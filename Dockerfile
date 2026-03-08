@@ -1,5 +1,7 @@
-# ---- Base ----
-FROM node:20-slim AS base
+# Single-stage build to stay within Railway memory limits
+FROM node:20-slim
+
+# Install ffmpeg and build tools for better-sqlite3
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
@@ -8,51 +10,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# ---- Dependencies ----
-FROM base AS deps
+# Install dependencies
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# ---- Build ----
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Copy source code
 COPY . .
 
-# Create data and upload directories
-RUN mkdir -p data uploads public/clips
-
-# Build Next.js in standalone mode
+# Build Next.js
 RUN npm run build
 
-# ---- Production ----
-FROM node:20-slim AS runner
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
+# Create persistent volume directory and symlinks
+RUN mkdir -p persist/data persist/uploads persist/clips \
+ && ln -sf /app/persist/data /app/data \
+ && ln -sf /app/persist/uploads /app/uploads \
+ && ln -sf /app/persist/clips /app/public/clips
 
 ENV NODE_ENV=production
 ENV PORT=3000
-
-# Copy standalone output
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-
-# Create single persistent directory (Railway volume mounts here)
-# Subdirectories: persist/data, persist/uploads, persist/clips
-RUN mkdir -p persist/data persist/uploads persist/clips
-
-# Symlink app paths to the persistent volume
-RUN ln -s /app/persist/data /app/data \
- && ln -s /app/persist/uploads /app/uploads \
- && ln -s /app/persist/clips /app/public/clips
-
-# Copy drizzle migrations if they exist
-COPY --from=builder /app/drizzle ./drizzle
-
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["npm", "run", "start"]
