@@ -1,0 +1,226 @@
+"use client";
+
+import { useState, useRef, useCallback, useEffect } from "react";
+
+export interface MediaDevice {
+  deviceId: string;
+  label: string;
+  kind: MediaDeviceKind;
+}
+
+interface MediaRecorderState {
+  isRecording: boolean;
+  isPaused: boolean;
+  duration: number;
+  error: string | null;
+  stream: MediaStream | null;
+  blob: Blob | null;
+}
+
+export function useMediaRecorder() {
+  const [state, setState] = useState<MediaRecorderState>({
+    isRecording: false,
+    isPaused: false,
+    duration: 0,
+    error: null,
+    stream: null,
+    blob: null,
+  });
+
+  const [devices, setDevices] = useState<{
+    cameras: MediaDevice[];
+    microphones: MediaDevice[];
+  }>({ cameras: [], microphones: [] });
+
+  const [selectedCamera, setSelectedCamera] = useState<string>("");
+  const [selectedMic, setSelectedMic] = useState<string>("");
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number>(0);
+
+  // Enumerate devices
+  const refreshDevices = useCallback(async () => {
+    try {
+      // Need permission first to get labels
+      await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      const allDevices = await navigator.mediaDevices.enumerateDevices();
+
+      const cameras = allDevices
+        .filter((d) => d.kind === "videoinput")
+        .map((d) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Camera ${d.deviceId.slice(0, 4)}`,
+          kind: d.kind,
+        }));
+
+      const microphones = allDevices
+        .filter((d) => d.kind === "audioinput")
+        .map((d) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Mic ${d.deviceId.slice(0, 4)}`,
+          kind: d.kind,
+        }));
+
+      setDevices({ cameras, microphones });
+
+      // Auto-select external mic if available (usually last in list, not "default")
+      const externalMic = microphones.find(
+        (m) =>
+          !m.label.toLowerCase().includes("built-in") &&
+          !m.label.toLowerCase().includes("default") &&
+          m.deviceId !== "default"
+      );
+      if (externalMic && !selectedMic) {
+        setSelectedMic(externalMic.deviceId);
+      } else if (microphones.length > 0 && !selectedMic) {
+        setSelectedMic(microphones[0].deviceId);
+      }
+
+      // Auto-select rear camera
+      if (cameras.length > 0 && !selectedCamera) {
+        setSelectedCamera(cameras[cameras.length > 1 ? 1 : 0].deviceId);
+      }
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        error: `Device access denied: ${err}`,
+      }));
+    }
+  }, [selectedCamera, selectedMic]);
+
+  useEffect(() => {
+    refreshDevices();
+    navigator.mediaDevices.addEventListener("devicechange", refreshDevices);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", refreshDevices);
+    };
+  }, [refreshDevices]);
+
+  // Get preferred MIME type
+  const getMimeType = useCallback(() => {
+    const types = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4",
+    ];
+    return types.find((t) => MediaRecorder.isTypeSupported(t)) || "video/webm";
+  }, []);
+
+  // Start preview stream
+  const startPreview = useCallback(async () => {
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: selectedCamera
+          ? { deviceId: { exact: selectedCamera } }
+          : { facingMode: "environment" },
+        audio: selectedMic
+          ? { deviceId: { exact: selectedMic } }
+          : true,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setState((prev) => ({ ...prev, stream, error: null }));
+      return stream;
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        error: `Failed to start camera: ${err}`,
+      }));
+      return null;
+    }
+  }, [selectedCamera, selectedMic]);
+
+  // Start recording
+  const startRecording = useCallback(async () => {
+    let stream = state.stream;
+    if (!stream) {
+      stream = await startPreview();
+      if (!stream) return;
+    }
+
+    const mimeType = getMimeType();
+    const recorder = new MediaRecorder(stream, { mimeType });
+    chunksRef.current = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      setState((prev) => ({ ...prev, blob, isRecording: false, isPaused: false }));
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+
+    recorder.onerror = () => {
+      setState((prev) => ({
+        ...prev,
+        error: "Recording error occurred",
+        isRecording: false,
+      }));
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+
+    mediaRecorderRef.current = recorder;
+    recorder.start(30000); // 30-second chunks for safety
+
+    startTimeRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      setState((prev) => ({
+        ...prev,
+        duration: Math.floor((Date.now() - startTimeRef.current) / 1000),
+      }));
+    }, 1000);
+
+    setState((prev) => ({
+      ...prev,
+      isRecording: true,
+      isPaused: false,
+      duration: 0,
+      blob: null,
+      error: null,
+    }));
+  }, [state.stream, startPreview, getMimeType]);
+
+  // Stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current?.state !== "inactive") {
+      mediaRecorderRef.current?.stop();
+    }
+  }, []);
+
+  // Cleanup
+  const cleanup = useCallback(() => {
+    if (mediaRecorderRef.current?.state !== "inactive") {
+      mediaRecorderRef.current?.stop();
+    }
+    state.stream?.getTracks().forEach((t) => t.stop());
+    if (timerRef.current) clearInterval(timerRef.current);
+    setState({
+      isRecording: false,
+      isPaused: false,
+      duration: 0,
+      error: null,
+      stream: null,
+      blob: null,
+    });
+  }, [state.stream]);
+
+  return {
+    ...state,
+    devices,
+    selectedCamera,
+    selectedMic,
+    setSelectedCamera,
+    setSelectedMic,
+    startPreview,
+    startRecording,
+    stopRecording,
+    cleanup,
+    refreshDevices,
+  };
+}
