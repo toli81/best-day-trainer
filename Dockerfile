@@ -30,4 +30,6 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+# At runtime, ensure persist subdirectories exist
+# (volume mount replaces /app/persist, so build-time dirs are lost)
+CMD mkdir -p /app/persist/data /app/persist/uploads /app/persist/clips && npm run start
