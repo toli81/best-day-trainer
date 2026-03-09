@@ -6,7 +6,7 @@ if (!process.env.GEMINI_API_KEY) {
 
 export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export const GEMINI_MODEL = "gemini-2.5-pro-preview-06-05";
+export const GEMINI_MODEL = "gemini-2.5-pro";
 
 export async function uploadVideoToGemini(filePath: string, mimeType = "video/mp4") {
   const uploadResult = await ai.files.upload({
