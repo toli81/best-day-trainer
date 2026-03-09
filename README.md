@@ -1,36 +1,193 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Best Day - Personal Training Session Analyzer
+
+A full-stack web application that helps personal trainers record, analyze, and document training sessions using AI. Upload or record a session video, and the app automatically identifies each exercise, extracts clips, analyzes form, generates coaching notes, and builds a searchable exercise library.
+
+## What It Does
+
+1. **Record or upload** a training session video
+2. **AI analyzes** the video to identify every exercise performed
+3. **Extracts clips** and thumbnails for each individual exercise
+4. **Generates professional session notes** with form observations and recommendations
+5. **Builds a searchable library** of all exercises across all sessions
+
+## Features
+
+### Video Capture
+- Record directly from your device camera with live preview
+- Camera and microphone selection (auto-detects external mics)
+- Screen wake-lock to prevent the phone from sleeping during recording
+- Drag-and-drop or file picker upload (MP4, WebM, MOV)
+- Real-time upload progress tracking
+
+### AI-Powered Video Analysis
+- **Google Gemini** performs two-pass video analysis:
+  - **Overview pass** identifies all exercises and rest periods with timestamps
+  - **Detail pass** analyzes each exercise for name, form quality, muscle groups, reps, sets, equipment, difficulty, and coaching cues
+- **Claude** generates professional session notes including:
+  - Session overview
+  - Per-exercise observations
+  - Form and technique assessment
+  - Recommendations for the next session
+- **Claude** standardizes exercise names and auto-generates searchability tags (movement patterns, body regions, modalities, planes of motion)
+
+### Exercise Library
+- Searchable across all sessions with real-time filtering
+- Category filters: strength, cardio, flexibility, warmup, cooldown, plyometric
+- Each exercise includes: video clip, thumbnail, description, muscle groups, equipment, difficulty, rep/set counts, form notes, and coaching cues
+- AI-generated tags for discoverability
+
+### Session Management
+- Dashboard with all sessions and color-coded status badges
+- Real-time processing status with progress tracking (analyzing, segmenting, generating notes, complete)
+- Detailed session view with notes and exercise grid
+- Processing time estimates and retry on error
+
+### UI/UX
+- Dark and light theme with system preference detection
+- Responsive design (mobile, tablet, desktop)
+- Exercise detail modals with embedded video playback
+- Sticky navigation header
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript |
+| UI | React 19, Tailwind CSS 4, shadcn/ui |
+| Database | SQLite (better-sqlite3) with Drizzle ORM |
+| Video Processing | FFmpeg (fluent-ffmpeg + ffmpeg-static) |
+| AI - Video Analysis | Google Gemini API (@google/genai) |
+| AI - Notes & Tagging | Anthropic Claude API (@anthropic-ai/sdk) |
+| Deployment | Docker on Railway with persistent volume |
+
+## Project Structure
+
+```
+best-day-trainer/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx                    # Dashboard
+│   │   ├── record/page.tsx             # Live recording
+│   │   ├── upload/page.tsx             # File upload
+│   │   ├── library/page.tsx            # Exercise library
+│   │   ├── sessions/
+│   │   │   ├── page.tsx                # All sessions
+│   │   │   └── [sessionId]/page.tsx    # Session detail
+│   │   └── api/
+│   │       ├── upload/route.ts         # Video upload endpoint
+│   │       ├── exercises/              # Exercise CRUD
+│   │       └── sessions/               # Session CRUD + processing
+│   ├── components/
+│   │   ├── exercises/                  # Exercise cards, detail modal, grid
+│   │   ├── sessions/                   # Processing status tracker
+│   │   ├── layout/                     # Header navigation
+│   │   └── ui/                         # shadcn/ui components
+│   ├── hooks/
+│   │   ├── use-media-recorder.ts       # Camera/mic recording
+│   │   ├── use-upload.ts               # XHR upload with progress
+│   │   └── use-wake-lock.ts            # Screen wake lock
+│   └── lib/
+│       ├── db/                         # Schema, queries, connection
+│       ├── gemini/                     # Video analysis pipeline
+│       ├── claude/                     # Session notes + library tagging
+│       ├── video/                      # FFmpeg clip extraction
+│       └── processing/                 # Orchestration pipeline
+├── data/                               # SQLite database (gitignored)
+├── uploads/                            # Raw video files (gitignored)
+├── public/clips/                       # Extracted exercise clips (gitignored)
+├── Dockerfile                          # Production Docker build
+├── railway.toml                        # Railway deployment config
+└── drizzle.config.ts                   # Database config
+```
+
+## Database Schema
+
+**sessions** - Training session records
+- Video file reference, duration, status
+- AI-generated overview analysis and session notes
+- Processing state tracking (uploading → analyzing → segmenting → generating_notes → complete)
+
+**exercises** - Individual exercises extracted from sessions
+- Timestamps (start/end), clip and thumbnail file paths
+- Name, description, category, difficulty
+- Muscle groups, equipment, rep/set counts
+- Form notes, coaching cues, searchability tags
+- Foreign key to sessions (cascade delete)
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+- Node.js 20+
+- FFmpeg installed locally (or use Docker)
+- Google Gemini API key
+- Anthropic Claude API key
+
+### Local Development
 
 ```bash
+# Clone the repo
+git clone https://github.com/toli81/best-day-trainer.git
+cd best-day-trainer
+
+# Install dependencies
+npm install
+
+# Create environment file with your API keys
+# Add GEMINI_API_KEY and ANTHROPIC_API_KEY
+cp .env.local.example .env.local
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Yes | Google Gemini API key for video analysis |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic Claude API key for notes and tagging |
+| `NEXT_PUBLIC_APP_NAME` | No | App display name |
 
-## Learn More
+### Production Deployment (Railway)
 
-To learn more about Next.js, take a look at the following resources:
+The app is configured for deployment on Railway with Docker:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# Push to GitHub (Railway auto-deploys on push)
+git push origin master
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Railway setup:**
+1. Create a new project from your GitHub repo
+2. Add environment variables (GEMINI_API_KEY, ANTHROPIC_API_KEY)
+3. Add a persistent volume mounted at `/app/persist`
+4. Generate a public domain under Settings > Networking
 
-## Deploy on Vercel
+## Processing Pipeline
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+When a video is uploaded or recorded, the processing pipeline runs:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+Upload Video
+    ↓
+Gemini: Identify all exercises with timestamps (Overview Pass)
+    ↓
+Gemini: Analyze each exercise in detail (Detail Pass)
+    ↓
+FFmpeg: Extract video clips for each exercise
+    ↓
+FFmpeg: Generate thumbnails at midpoints
+    ↓
+Claude: Generate professional session notes
+    ↓
+Claude: Standardize exercise names and generate tags
+    ↓
+Complete — session ready for review
+```
+
+## License
+
+Private project.
