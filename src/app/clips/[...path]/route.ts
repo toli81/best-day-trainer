@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";
+import { getPresignedGetUrl } from "@/lib/r2/client";
 
 const MIME_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -15,19 +16,32 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const segments = (await params).path;
-  const filePath = path.join(process.cwd(), "public", "clips", ...segments);
+  const localFilePath = path.join(process.cwd(), "public", "clips", ...segments);
 
   // Security: prevent path traversal
-  const resolved = path.resolve(filePath);
+  const resolved = path.resolve(localFilePath);
   const clipsRoot = path.resolve(path.join(process.cwd(), "public", "clips"));
   if (!resolved.startsWith(clipsRoot)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (!fs.existsSync(resolved)) {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  // Try local file first (backward compat for old sessions)
+  if (fs.existsSync(resolved)) {
+    return serveLocalFile(request, resolved);
   }
 
+  // Not found locally — try R2
+  try {
+    const r2Key = `clips/${segments.join("/")}`;
+    const presignedUrl = await getPresignedGetUrl(r2Key, 3600);
+    return NextResponse.redirect(presignedUrl);
+  } catch (err) {
+    console.error("Failed to get R2 presigned URL for clip:", err);
+    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  }
+}
+
+function serveLocalFile(request: NextRequest, resolved: string) {
   const ext = path.extname(resolved).toLowerCase();
   const contentType = MIME_TYPES[ext] || "application/octet-stream";
   const stat = fs.statSync(resolved);

@@ -1,90 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
-import fs from "fs";
+import { completeMultipartUpload } from "@/lib/r2/client";
+import { getUploadSession, deleteUploadSession } from "@/lib/r2/upload-sessions";
 import { createSession } from "@/lib/db/queries";
 
 export async function POST(req: NextRequest) {
   try {
-    const { uploadId } = await req.json();
+    const { uploadId, parts } = await req.json();
 
-    if (!uploadId) {
+    if (!uploadId || !parts || !Array.isArray(parts) || parts.length === 0) {
       return NextResponse.json(
-        { error: "uploadId is required" },
+        { error: "uploadId and parts array are required" },
         { status: 400 }
       );
     }
 
-    const chunksDir = path.join(process.cwd(), "uploads", "chunks", uploadId);
-    if (!fs.existsSync(chunksDir)) {
+    const session = getUploadSession(uploadId);
+    if (!session) {
       return NextResponse.json(
-        { error: "Invalid uploadId" },
+        { error: "Invalid or expired uploadId" },
         { status: 404 }
       );
     }
 
-    // Read metadata
-    const meta = JSON.parse(
-      fs.readFileSync(path.join(chunksDir, "_meta.json"), "utf-8")
-    );
+    // Complete the R2 multipart upload
+    await completeMultipartUpload(session.r2Key, session.r2UploadId, parts);
 
-    // Get chunk files sorted by index
-    const chunkFiles = fs
-      .readdirSync(chunksDir)
-      .filter((f) => f.startsWith("chunk_"))
-      .sort();
-
-    if (chunkFiles.length === 0) {
-      return NextResponse.json(
-        { error: "No chunks uploaded" },
-        { status: 400 }
-      );
-    }
-
-    // Reassemble file by streaming chunks to the final file
-    const uploadDir = path.join(process.cwd(), "uploads");
-    const ext = path.extname(meta.fileName) || ".mp4";
-    const sessionId = uploadId;
-    const savedFileName = `${sessionId}${ext}`;
-    const savedFilePath = path.join(uploadDir, savedFileName);
-
-    const writeStream = fs.createWriteStream(savedFilePath);
-    for (const chunkFile of chunkFiles) {
-      const chunkPath = path.join(chunksDir, chunkFile);
-      const chunkData = fs.readFileSync(chunkPath);
-      writeStream.write(chunkData);
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      writeStream.on("finish", resolve);
-      writeStream.on("error", reject);
-      writeStream.end();
-    });
-
-    // Clean up chunks
-    for (const file of fs.readdirSync(chunksDir)) {
-      fs.unlinkSync(path.join(chunksDir, file));
-    }
-    fs.rmdirSync(chunksDir);
-
-    // Get final file size
-    const stats = fs.statSync(savedFilePath);
-
-    // Create session in database
+    // Create session in database with R2 key reference
     const now = new Date().toISOString();
-    const session = await createSession({
+    const sessionId = uploadId;
+    const dbSession = await createSession({
       id: sessionId,
-      title: meta.title || `Session ${new Date().toLocaleDateString()}`,
-      clientName: meta.clientName || undefined,
+      title: session.title || `Session ${new Date().toLocaleDateString()}`,
+      clientName: session.clientName || undefined,
       recordedAt: now,
-      videoFilePath: savedFilePath,
-      videoFileName: meta.fileName,
-      videoSizeBytes: stats.size,
+      videoFilePath: `r2://${session.r2Key}`,
+      videoFileName: session.fileName,
+      videoSizeBytes: session.fileSize,
       status: "uploaded",
       createdAt: now,
       updatedAt: now,
     });
 
-    return NextResponse.json({ sessionId: session.id, status: session.status });
+    // Clean up in-memory session
+    deleteUploadSession(uploadId);
+
+    console.log(
+      `Upload complete: ${sessionId}, stored at r2://${session.r2Key}`
+    );
+
+    return NextResponse.json({
+      sessionId: dbSession.id,
+      status: dbSession.status,
+    });
   } catch (error) {
     console.error("Upload complete error:", error);
     return NextResponse.json(

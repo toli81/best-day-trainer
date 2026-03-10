@@ -149,8 +149,8 @@ export default function UploadPage() {
             <div className="space-y-2">
               <div className="flex justify-between text-sm text-secondary-foreground">
                 <span>
-                  {stage === "assembling"
-                    ? "Assembling video..."
+                  {stage === "finalizing"
+                    ? "Finalizing..."
                     : `Uploading session...`}
                 </span>
                 <span>{progress}%</span>

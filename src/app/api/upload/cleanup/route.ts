@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
-import fs from "fs";
+import { abortMultipartUpload } from "@/lib/r2/client";
+import { getUploadSession, deleteUploadSession } from "@/lib/r2/upload-sessions";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,21 +13,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const chunksDir = path.join(process.cwd(), "uploads", "chunks", uploadId);
-
-    if (fs.existsSync(chunksDir)) {
-      const files = fs.readdirSync(chunksDir);
-      for (const file of files) {
-        fs.unlinkSync(path.join(chunksDir, file));
-      }
-      fs.rmdirSync(chunksDir);
-      console.log(`Cleaned up failed upload: ${uploadId}`);
+    const session = getUploadSession(uploadId);
+    if (session) {
+      await abortMultipartUpload(session.r2Key, session.r2UploadId);
+      deleteUploadSession(uploadId);
+      console.log(`Upload cleanup: aborted multipart upload ${uploadId}`);
     }
 
     return NextResponse.json({ cleaned: true });
   } catch (error) {
     console.error("Cleanup error:", error);
-    // Don't fail hard on cleanup errors
+    // Non-critical — don't fail
     return NextResponse.json({ cleaned: false, details: String(error) });
   }
 }

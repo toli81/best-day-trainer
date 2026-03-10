@@ -1,19 +1,38 @@
 import { nanoid } from "nanoid";
 import path from "path";
+import fs from "fs";
+import os from "os";
 import { runFullAnalysis } from "@/lib/gemini/analyze-session";
 import { extractClip, generateThumbnail, getVideoDuration } from "@/lib/video/ffmpeg";
 import { generateSessionNotes } from "@/lib/claude/session-notes";
 import { standardizeAndTagExercises } from "@/lib/claude/library-manager";
 import { updateSessionStatus, createExercises, getSession } from "@/lib/db/queries";
 import { parseTimestamp } from "@/lib/utils/timestamps";
+import { downloadToFile, uploadFile } from "@/lib/r2/client";
 import type { NewExercise } from "@/lib/db/schema";
 
 export async function processSession(sessionId: string) {
   const session = await getSession(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
-  const videoPath = session.videoFilePath;
-  const clipsDir = path.join(process.cwd(), "public", "clips", sessionId);
+  const isR2 = session.videoFilePath.startsWith("r2://");
+  let videoPath: string;
+  let clipsDir: string;
+
+  if (isR2) {
+    // Download from R2 to temp directory for FFmpeg processing
+    const r2Key = session.videoFilePath.replace("r2://", "");
+    const ext = path.extname(session.videoFileName) || ".mp4";
+    videoPath = path.join(os.tmpdir(), `bdt-${sessionId}${ext}`);
+    clipsDir = path.join(os.tmpdir(), "bdt-clips", sessionId);
+    console.log(`Downloading video from R2: ${r2Key} → ${videoPath}`);
+    await downloadToFile(r2Key, videoPath);
+    console.log(`Download complete: ${videoPath}`);
+  } else {
+    // Legacy: local filesystem path
+    videoPath = session.videoFilePath;
+    clipsDir = path.join(process.cwd(), "public", "clips", sessionId);
+  }
 
   try {
     // Update status
@@ -49,6 +68,8 @@ export async function processSession(sessionId: string) {
     });
 
     // Extract clips and thumbnails with FFmpeg
+    fs.mkdirSync(clipsDir, { recursive: true });
+
     const exerciseRecords: NewExercise[] = [];
     const now = new Date().toISOString();
 
@@ -66,6 +87,13 @@ export async function processSession(sessionId: string) {
       const clipPath = path.join(clipsDir, clipFileName);
       try {
         await extractClip(videoPath, startSec, endSec, clipPath);
+
+        // Upload clip to R2 if this is an R2 session
+        if (isR2 && fs.existsSync(clipPath)) {
+          const r2ClipKey = `clips/${sessionId}/${clipFileName}`;
+          const clipBuffer = fs.readFileSync(clipPath);
+          await uploadFile(r2ClipKey, clipBuffer, "video/mp4");
+        }
       } catch (err) {
         console.error(`Failed to extract clip for exercise ${i}:`, err);
       }
@@ -75,6 +103,14 @@ export async function processSession(sessionId: string) {
       const midpoint = startSec + clipDuration / 2;
       try {
         await generateThumbnail(videoPath, midpoint, clipsDir, thumbFileName);
+
+        // Upload thumbnail to R2 if this is an R2 session
+        const thumbPath = path.join(clipsDir, thumbFileName);
+        if (isR2 && fs.existsSync(thumbPath)) {
+          const r2ThumbKey = `clips/${sessionId}/${thumbFileName}`;
+          const thumbBuffer = fs.readFileSync(thumbPath);
+          await uploadFile(r2ThumbKey, thumbBuffer, "image/jpeg");
+        }
       } catch (err) {
         console.error(`Failed to generate thumbnail for exercise ${i}:`, err);
       }
@@ -152,5 +188,19 @@ export async function processSession(sessionId: string) {
       processingError: String(error),
     });
     throw error;
+  } finally {
+    // Clean up temp files for R2 sessions
+    if (isR2) {
+      try {
+        if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
+      } catch (err) {
+        console.warn(`Failed to clean up temp video: ${err}`);
+      }
+      try {
+        if (fs.existsSync(clipsDir)) fs.rmSync(clipsDir, { recursive: true });
+      } catch (err) {
+        console.warn(`Failed to clean up temp clips: ${err}`);
+      }
+    }
   }
 }

@@ -2,66 +2,64 @@
 
 import { useState, useCallback, useRef } from "react";
 
-const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB per chunk (smaller for mobile reliability)
 const MAX_RETRIES = 5;
-const CHUNK_TIMEOUT_MS = 60_000; // 60s timeout per chunk
+const PART_TIMEOUT_MS = 120_000; // 120s timeout per part (10MB over mobile)
 
 interface UploadState {
   progress: number;
   uploading: boolean;
   error: string | null;
   sessionId: string | null;
-  stage: "idle" | "uploading" | "assembling";
+  stage: "idle" | "uploading" | "finalizing";
 }
 
-async function sendChunkWithRetry(
-  uploadId: string,
-  chunk: Blob,
-  chunkIndex: number,
+async function uploadPartWithRetry(
+  presignedUrl: string,
+  partBlob: Blob,
+  partNumber: number,
   retries = MAX_RETRIES
-): Promise<void> {
+): Promise<string> {
   for (let attempt = 0; attempt < retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PART_TIMEOUT_MS);
+
     try {
-      const formData = new FormData();
-      formData.append("uploadId", uploadId);
-      formData.append("chunkIndex", String(chunkIndex));
-      formData.append("chunk", chunk);
+      const res = await fetch(presignedUrl, {
+        method: "PUT",
+        body: partBlob,
+        signal: controller.signal,
+      });
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), CHUNK_TIMEOUT_MS);
+      clearTimeout(timeoutId);
 
-      try {
-        const res = await fetch("/api/upload/chunk", {
-          method: "POST",
-          body: formData,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(
-            data.details || data.error || `Chunk ${chunkIndex} failed: ${res.statusText}`
-          );
-        }
-        return; // success
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (err instanceof DOMException && err.name === "AbortError") {
-          throw new Error(`Chunk ${chunkIndex} timed out`);
-        }
-        throw err;
+      if (!res.ok) {
+        throw new Error(`Part ${partNumber} failed: ${res.status} ${res.statusText}`);
       }
+
+      // ETag is required for completing the multipart upload
+      const etag = res.headers.get("ETag");
+      if (!etag) {
+        throw new Error(`Part ${partNumber}: no ETag in response`);
+      }
+      return etag;
     } catch (err) {
-      if (attempt === retries - 1) {
+      clearTimeout(timeoutId);
+
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Timeout
+        if (attempt === retries - 1) {
+          throw new Error(`Part ${partNumber} timed out after ${retries} attempts`);
+        }
+      } else if (attempt === retries - 1) {
         const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Upload failed at chunk ${chunkIndex + 1} after ${retries} attempts: ${msg}`);
+        throw new Error(`Part ${partNumber} failed after ${retries} attempts: ${msg}`);
       }
-      // Exponential backoff: 2s, 4s, 6s, 8s
+
+      // Exponential backoff: 2s, 4s, 6s, 8s, 10s
       await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
     }
   }
+  throw new Error("Unreachable");
 }
 
 export function useUpload() {
@@ -88,7 +86,7 @@ export function useUpload() {
       let uploadId: string | null = null;
 
       try {
-        // Step 1: Initialize upload (also cleans up stale uploads on server)
+        // Step 1: Initialize upload — get presigned URLs for all parts
         const initRes = await fetch("/api/upload/init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -109,31 +107,35 @@ export function useUpload() {
           );
         }
 
-        uploadId = (await initRes.json()).uploadId;
+        const { uploadId: id, partSize, totalParts, presignedUrls } =
+          await initRes.json();
+        uploadId = id;
 
-        // Step 2: Upload chunks
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        // Step 2: Upload parts directly to R2
+        const completedParts: { ETag: string; PartNumber: number }[] = [];
 
-        for (let i = 0; i < totalChunks; i++) {
+        for (let i = 0; i < totalParts; i++) {
           if (abortRef.current) throw new Error("Upload cancelled");
 
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const chunk = file.slice(start, end);
+          const start = i * partSize;
+          const end = Math.min(start + partSize, file.size);
+          const partBlob = file.slice(start, end);
 
-          await sendChunkWithRetry(uploadId!, chunk, i);
+          const { partNumber, url } = presignedUrls[i];
+          const etag = await uploadPartWithRetry(url, partBlob, partNumber);
+          completedParts.push({ ETag: etag, PartNumber: partNumber });
 
-          const progress = Math.round(((i + 1) / totalChunks) * 95); // 0-95% for chunks
+          const progress = Math.round(((i + 1) / totalParts) * 95); // 0-95%
           setState((prev) => ({ ...prev, progress }));
         }
 
-        // Step 3: Complete upload (reassemble on server)
-        setState((prev) => ({ ...prev, stage: "assembling", progress: 97 }));
+        // Step 3: Complete upload
+        setState((prev) => ({ ...prev, stage: "finalizing", progress: 97 }));
 
         const completeRes = await fetch("/api/upload/complete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uploadId }),
+          body: JSON.stringify({ uploadId, parts: completedParts }),
         });
 
         if (!completeRes.ok) {
@@ -153,7 +155,7 @@ export function useUpload() {
 
         return sessionId;
       } catch (err) {
-        // Clean up orphaned chunks on server so they don't fill disk
+        // Clean up the R2 multipart upload on failure
         if (uploadId) {
           fetch("/api/upload/cleanup", {
             method: "POST",

@@ -20,11 +20,10 @@ COPY . .
 # Build Next.js
 RUN npm run build
 
-# Create persistent volume directory and symlinks
-RUN mkdir -p persist/data persist/uploads persist/clips \
- && ln -sf /app/persist/data /app/data \
- && ln -sf /app/persist/uploads /app/uploads \
- && ln -sf /app/persist/clips /app/public/clips
+# Create persistent volume directory and symlink for SQLite DB
+# Videos and clips now stored in Cloudflare R2 (not local filesystem)
+RUN mkdir -p persist/data \
+ && ln -sf /app/persist/data /app/data
 
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -32,4 +31,4 @@ EXPOSE 3000
 
 # At runtime, ensure persist subdirectories exist
 # (volume mount replaces /app/persist, so build-time dirs are lost)
-CMD mkdir -p /app/persist/data /app/persist/uploads /app/persist/clips && npm run start
+CMD mkdir -p /app/persist/data && npm run start
