@@ -85,8 +85,10 @@ export function useUpload() {
         stage: "uploading",
       });
 
+      let uploadId: string | null = null;
+
       try {
-        // Step 1: Initialize upload
+        // Step 1: Initialize upload (also cleans up stale uploads on server)
         const initRes = await fetch("/api/upload/init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -102,10 +104,12 @@ export function useUpload() {
 
         if (!initRes.ok) {
           const data = await initRes.json().catch(() => ({}));
-          throw new Error(data.error || "Failed to initialize upload");
+          throw new Error(
+            data.details || data.error || "Failed to initialize upload"
+          );
         }
 
-        const { uploadId } = await initRes.json();
+        uploadId = (await initRes.json()).uploadId;
 
         // Step 2: Upload chunks
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -117,7 +121,7 @@ export function useUpload() {
           const end = Math.min(start + CHUNK_SIZE, file.size);
           const chunk = file.slice(start, end);
 
-          await sendChunkWithRetry(uploadId, chunk, i);
+          await sendChunkWithRetry(uploadId!, chunk, i);
 
           const progress = Math.round(((i + 1) / totalChunks) * 95); // 0-95% for chunks
           setState((prev) => ({ ...prev, progress }));
@@ -149,6 +153,15 @@ export function useUpload() {
 
         return sessionId;
       } catch (err) {
+        // Clean up orphaned chunks on server so they don't fill disk
+        if (uploadId) {
+          fetch("/api/upload/cleanup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uploadId }),
+          }).catch(() => {}); // fire and forget
+        }
+
         const error =
           err instanceof Error ? err.message : "Upload failed: unknown error";
         setState((prev) => ({
