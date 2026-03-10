@@ -11,7 +11,7 @@ import { formatFileSize } from "@/lib/utils/timestamps";
 
 export default function UploadPage() {
   const router = useRouter();
-  const { progress, uploading, error, upload } = useUpload();
+  const { progress, uploading, error, stage, upload, cancel } = useUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -148,10 +148,22 @@ export default function UploadPage() {
           <CardContent className="py-6">
             <div className="space-y-2">
               <div className="flex justify-between text-sm text-secondary-foreground">
-                <span>Uploading...</span>
+                <span>
+                  {stage === "assembling"
+                    ? "Assembling video..."
+                    : `Uploading session...`}
+                </span>
                 <span>{progress}%</span>
               </div>
               <Progress value={progress} className="[&>div]:bg-[#00CCFF]" />
+              {stage === "uploading" && (
+                <button
+                  onClick={cancel}
+                  className="mt-2 text-xs text-red-400 hover:text-red-300"
+                >
+                  Cancel upload
+                </button>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -1,12 +1,47 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
+const MAX_RETRIES = 3;
 
 interface UploadState {
   progress: number;
   uploading: boolean;
   error: string | null;
   sessionId: string | null;
+  stage: "idle" | "uploading" | "assembling";
+}
+
+async function sendChunkWithRetry(
+  uploadId: string,
+  chunk: Blob,
+  chunkIndex: number,
+  retries = MAX_RETRIES
+): Promise<void> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const formData = new FormData();
+      formData.append("uploadId", uploadId);
+      formData.append("chunkIndex", String(chunkIndex));
+      formData.append("chunk", chunk);
+
+      const res = await fetch("/api/upload/chunk", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Chunk ${chunkIndex} failed: ${res.statusText}`);
+      }
+      return; // success
+    } catch (err) {
+      if (attempt === retries - 1) throw err;
+      // Wait before retry (exponential backoff)
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
 }
 
 export function useUpload() {
@@ -15,59 +50,113 @@ export function useUpload() {
     uploading: false,
     error: null,
     sessionId: null,
+    stage: "idle",
   });
+  const abortRef = useRef(false);
 
   const upload = useCallback(
     async (file: File, clientName?: string, sessionDate?: string) => {
-      setState({ progress: 0, uploading: true, error: null, sessionId: null });
-
-      return new Promise<string>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        const formData = new FormData();
-        formData.append("video", file);
-        if (clientName) formData.append("clientName", clientName);
-        if (sessionDate) formData.append("sessionDate", sessionDate);
-
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            const progress = Math.round((e.loaded / e.total) * 100);
-            setState((prev) => ({ ...prev, progress }));
-          }
-        });
-
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            const data = JSON.parse(xhr.responseText);
-            setState({
-              progress: 100,
-              uploading: false,
-              error: null,
-              sessionId: data.sessionId,
-            });
-            resolve(data.sessionId);
-          } else {
-            const error = `Upload failed: ${xhr.statusText}`;
-            setState((prev) => ({ ...prev, uploading: false, error }));
-            reject(new Error(error));
-          }
-        });
-
-        xhr.addEventListener("error", () => {
-          const error = "Upload failed: network error";
-          setState((prev) => ({ ...prev, uploading: false, error }));
-          reject(new Error(error));
-        });
-
-        xhr.open("POST", "/api/upload");
-        xhr.send(formData);
+      abortRef.current = false;
+      setState({
+        progress: 0,
+        uploading: true,
+        error: null,
+        sessionId: null,
+        stage: "uploading",
       });
+
+      try {
+        // Step 1: Initialize upload
+        const initRes = await fetch("/api/upload/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileSize: file.size,
+            clientName: clientName || null,
+            title: sessionDate
+              ? `Session ${new Date(sessionDate).toLocaleDateString()}`
+              : null,
+          }),
+        });
+
+        if (!initRes.ok) {
+          const data = await initRes.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to initialize upload");
+        }
+
+        const { uploadId } = await initRes.json();
+
+        // Step 2: Upload chunks
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+        for (let i = 0; i < totalChunks; i++) {
+          if (abortRef.current) throw new Error("Upload cancelled");
+
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+
+          await sendChunkWithRetry(uploadId, chunk, i);
+
+          const progress = Math.round(((i + 1) / totalChunks) * 95); // 0-95% for chunks
+          setState((prev) => ({ ...prev, progress }));
+        }
+
+        // Step 3: Complete upload (reassemble on server)
+        setState((prev) => ({ ...prev, stage: "assembling", progress: 97 }));
+
+        const completeRes = await fetch("/api/upload/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uploadId }),
+        });
+
+        if (!completeRes.ok) {
+          const data = await completeRes.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to complete upload");
+        }
+
+        const { sessionId } = await completeRes.json();
+
+        setState({
+          progress: 100,
+          uploading: false,
+          error: null,
+          sessionId,
+          stage: "idle",
+        });
+
+        return sessionId;
+      } catch (err) {
+        const error =
+          err instanceof Error ? err.message : "Upload failed: unknown error";
+        setState((prev) => ({
+          ...prev,
+          uploading: false,
+          error,
+          stage: "idle",
+        }));
+        throw err;
+      }
     },
     []
   );
 
-  const reset = useCallback(() => {
-    setState({ progress: 0, uploading: false, error: null, sessionId: null });
+  const cancel = useCallback(() => {
+    abortRef.current = true;
   }, []);
 
-  return { ...state, upload, reset };
+  const reset = useCallback(() => {
+    abortRef.current = false;
+    setState({
+      progress: 0,
+      uploading: false,
+      error: null,
+      sessionId: null,
+      stage: "idle",
+    });
+  }, []);
+
+  return { ...state, upload, cancel, reset };
 }
