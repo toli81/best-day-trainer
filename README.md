@@ -17,7 +17,10 @@ A full-stack web application that helps personal trainers record, analyze, and d
 - Camera and microphone selection (auto-detects external mics)
 - Screen wake-lock to prevent the phone from sleeping during recording
 - Drag-and-drop or file picker upload (MP4, WebM, MOV)
-- Real-time upload progress tracking
+- **Chunked upload system** — large videos (1hr+) are split into 5MB chunks to prevent timeout failures
+- Automatic retry (3 attempts per chunk with exponential backoff) for unreliable mobile connections
+- Cancel upload support mid-transfer
+- Real-time upload progress tracking with assembling stage indicator
 
 ### AI-Powered Video Analysis
 - **Google Gemini** performs two-pass video analysis:
@@ -75,7 +78,10 @@ best-day-trainer/
 │   │   │   ├── page.tsx                # All sessions
 │   │   │   └── [sessionId]/page.tsx    # Session detail
 │   │   └── api/
-│   │       ├── upload/route.ts         # Video upload endpoint
+│   │       ├── upload/route.ts         # Simple video upload endpoint
+│   │       ├── upload/init/route.ts   # Chunked upload initialization
+│   │       ├── upload/chunk/route.ts  # Individual chunk receiver
+│   │       ├── upload/complete/route.ts # Chunk reassembly + finalization
 │   │       ├── exercises/              # Exercise CRUD
 │   │       └── sessions/               # Session CRUD + processing
 │   ├── components/
@@ -85,7 +91,7 @@ best-day-trainer/
 │   │   └── ui/                         # shadcn/ui components
 │   ├── hooks/
 │   │   ├── use-media-recorder.ts       # Camera/mic recording
-│   │   ├── use-upload.ts               # XHR upload with progress
+│   │   ├── use-upload.ts               # Chunked upload with progress & retry
 │   │   └── use-wake-lock.ts            # Screen wake lock
 │   └── lib/
 │       ├── db/                         # Schema, queries, connection
