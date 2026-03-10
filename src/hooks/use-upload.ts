@@ -2,8 +2,9 @@
 
 import { useState, useCallback, useRef } from "react";
 
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk
-const MAX_RETRIES = 3;
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB per chunk (smaller for mobile reliability)
+const MAX_RETRIES = 5;
+const CHUNK_TIMEOUT_MS = 60_000; // 60s timeout per chunk
 
 interface UploadState {
   progress: number;
@@ -26,20 +27,39 @@ async function sendChunkWithRetry(
       formData.append("chunkIndex", String(chunkIndex));
       formData.append("chunk", chunk);
 
-      const res = await fetch("/api/upload/chunk", {
-        method: "POST",
-        body: formData,
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), CHUNK_TIMEOUT_MS);
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Chunk ${chunkIndex} failed: ${res.statusText}`);
+      try {
+        const res = await fetch("/api/upload/chunk", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            data.details || data.error || `Chunk ${chunkIndex} failed: ${res.statusText}`
+          );
+        }
+        return; // success
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new Error(`Chunk ${chunkIndex} timed out`);
+        }
+        throw err;
       }
-      return; // success
     } catch (err) {
-      if (attempt === retries - 1) throw err;
-      // Wait before retry (exponential backoff)
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      if (attempt === retries - 1) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Upload failed at chunk ${chunkIndex + 1} after ${retries} attempts: ${msg}`);
+      }
+      // Exponential backoff: 2s, 4s, 6s, 8s
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
     }
   }
 }
