@@ -11,7 +11,7 @@ import { formatFileSize } from "@/lib/utils/timestamps";
 
 export default function UploadPage() {
   const router = useRouter();
-  const { progress, uploading, error, stage, upload, cancel } = useUpload();
+  const { progress, uploading, error, stage, upload, retry, cancel } = useUpload();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -173,6 +173,23 @@ export default function UploadPage() {
         <Card className="border-red-300 bg-red-50">
           <CardContent className="py-4 text-red-700">{error}</CardContent>
         </Card>
+      )}
+
+      {error && !uploading && (
+        <Button
+          onClick={async () => {
+            try {
+              const sessionId = await retry();
+              if (sessionId) router.push(`/sessions/${sessionId}`);
+            } catch {
+              // error is set in hook
+            }
+          }}
+          className="w-full rounded-[10px] bg-[#FF9900] text-white hover:bg-[#e68a00]"
+          size="lg"
+        >
+          Retry Upload
+        </Button>
       )}
 
       <Button

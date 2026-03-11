@@ -13,6 +13,62 @@ interface UploadState {
   stage: "idle" | "uploading" | "finalizing";
 }
 
+/** Try a small HEAD/OPTIONS against the R2 presigned URL domain to detect CORS issues early. */
+async function checkCorsAccess(presignedUrl: string): Promise<string | null> {
+  try {
+    // Use a simple GET with range 0-0 to check connectivity + CORS
+    // We use the presigned URL itself since CORS is per-origin
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
+    const res = await fetch(presignedUrl, {
+      method: "PUT",
+      body: new Blob([new Uint8Array(0)]),
+      signal: controller.signal,
+    }).catch((err) => {
+      clearTimeout(timeoutId);
+      if (err instanceof TypeError && /network|fetch/i.test(err.message)) {
+        return null; // CORS or network error
+      }
+      throw err;
+    });
+
+    clearTimeout(timeoutId);
+
+    if (res === null) {
+      return (
+        "Cannot reach R2 storage. This is usually a CORS configuration issue. " +
+        "Please check that the R2 bucket CORS policy allows PUT requests from this domain " +
+        "and exposes the ETag header."
+      );
+    }
+    // Any response (even 400/403) means CORS is working - the presigned URL check is separate
+    return null;
+  } catch {
+    // Non-network error, let the actual upload handle it
+    return null;
+  }
+}
+
+function classifyError(err: unknown, partNumber: number, retries: number): string {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return `Part ${partNumber} timed out after ${retries} attempts. Your connection may be too slow — try on WiFi.`;
+  }
+
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // NetworkError / TypeError from fetch = CORS or connectivity issue
+  if (/network|fetch|failed to fetch/i.test(msg)) {
+    return (
+      `Part ${partNumber} failed after ${retries} attempts: Network error. ` +
+      "This usually means a CORS misconfiguration on R2 or a connectivity issue. " +
+      "Try switching between WiFi and mobile data, or check R2 CORS settings."
+    );
+  }
+
+  return `Part ${partNumber} failed after ${retries} attempts: ${msg}`;
+}
+
 async function uploadPartWithRetry(
   presignedUrl: string,
   partBlob: Blob,
@@ -45,14 +101,8 @@ async function uploadPartWithRetry(
     } catch (err) {
       clearTimeout(timeoutId);
 
-      if (err instanceof DOMException && err.name === "AbortError") {
-        // Timeout
-        if (attempt === retries - 1) {
-          throw new Error(`Part ${partNumber} timed out after ${retries} attempts`);
-        }
-      } else if (attempt === retries - 1) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`Part ${partNumber} failed after ${retries} attempts: ${msg}`);
+      if (attempt === retries - 1) {
+        throw new Error(classifyError(err, partNumber, retries));
       }
 
       // Exponential backoff: 2s, 4s, 6s, 8s, 10s
@@ -71,10 +121,13 @@ export function useUpload() {
     stage: "idle",
   });
   const abortRef = useRef(false);
+  // Store last upload args for retry
+  const lastArgsRef = useRef<{ file: File; clientName?: string; sessionDate?: string } | null>(null);
 
   const upload = useCallback(
     async (file: File, clientName?: string, sessionDate?: string) => {
       abortRef.current = false;
+      lastArgsRef.current = { file, clientName, sessionDate };
       setState({
         progress: 0,
         uploading: true,
@@ -110,6 +163,14 @@ export function useUpload() {
         const { uploadId: id, partSize, totalParts, presignedUrls } =
           await initRes.json();
         uploadId = id;
+
+        // Step 1.5: Quick CORS pre-check with the first presigned URL
+        if (presignedUrls.length > 0) {
+          const corsError = await checkCorsAccess(presignedUrls[0].url);
+          if (corsError) {
+            throw new Error(corsError);
+          }
+        }
 
         // Step 2: Upload parts directly to R2
         const completedParts: { ETag: string; PartNumber: number }[] = [];
@@ -178,6 +239,12 @@ export function useUpload() {
     []
   );
 
+  const retry = useCallback(async () => {
+    if (!lastArgsRef.current) return;
+    const { file, clientName, sessionDate } = lastArgsRef.current;
+    return upload(file, clientName, sessionDate);
+  }, [upload]);
+
   const cancel = useCallback(() => {
     abortRef.current = true;
   }, []);
@@ -193,5 +260,5 @@ export function useUpload() {
     });
   }, []);
 
-  return { ...state, upload, cancel, reset };
+  return { ...state, upload, retry, cancel, reset };
 }

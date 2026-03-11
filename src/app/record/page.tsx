@@ -48,6 +48,7 @@ export default function RecordPage() {
   } = useMediaRecorder();
   const wakeLock = useWakeLock();
   const uploader = useUpload();
+  const [retrying, setRetrying] = useState(false);
   const [phase, setPhase] = useState<"setup" | "recording" | "uploading">("setup");
 
   useEffect(() => {
@@ -219,6 +220,27 @@ export default function RecordPage() {
             {error || uploader.error}
           </CardContent>
         </Card>
+      )}
+
+      {uploader.error && !uploader.uploading && (
+        <Button
+          onClick={async () => {
+            setRetrying(true);
+            try {
+              const sessionId = await uploader.retry();
+              if (sessionId) router.push(`/sessions/${sessionId}`);
+            } catch {
+              // error is set in hook
+            } finally {
+              setRetrying(false);
+            }
+          }}
+          disabled={retrying}
+          size="lg"
+          className="w-full rounded-[10px] bg-[#FF9900] text-lg text-white hover:bg-[#e68a00]"
+        >
+          {retrying ? "Retrying..." : "Retry Upload"}
+        </Button>
       )}
     </div>
   );
