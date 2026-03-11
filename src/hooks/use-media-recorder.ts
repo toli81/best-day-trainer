@@ -78,9 +78,22 @@ export function useMediaRecorder() {
         setSelectedMic(microphones[0].deviceId);
       }
 
-      // Auto-select rear camera
+      // Auto-select widest angle rear camera
       if (cameras.length > 0 && !selectedCamera) {
-        setSelectedCamera(cameras[cameras.length > 1 ? 1 : 0].deviceId);
+        const rearCameras = cameras.filter(
+          (c) =>
+            !c.label.toLowerCase().includes("front") &&
+            !c.label.toLowerCase().includes("user")
+        );
+        // Prefer camera with "wide" or "ultra" in the label
+        const wideCam =
+          rearCameras.find((c) =>
+            /wide|ultra/i.test(c.label)
+          ) ||
+          // Fallback: last rear camera (often ultrawide on modern phones)
+          rearCameras[rearCameras.length - 1] ||
+          cameras[0];
+        setSelectedCamera(wideCam.deviceId);
       }
     } catch (err) {
       setState((prev) => ({
