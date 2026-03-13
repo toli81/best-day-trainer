@@ -66,3 +66,51 @@ Return as JSON matching this exact structure:
   "coachingCues": ["Cue 1", "Cue 2"]
 }`;
 }
+
+export function allExercisesDetailPrompt(
+  exercises: { startTimestamp: string; endTimestamp: string; label: string }[]
+) {
+  const exerciseList = exercises
+    .map(
+      (ex, i) =>
+        `  ${i}. "${ex.label}" from ${ex.startTimestamp} to ${ex.endTimestamp}`
+    )
+    .join("\n");
+
+  return `Analyze ALL of the following exercises from this training video. For each exercise, watch the specified time range and provide a detailed analysis.
+
+Exercises to analyze:
+${exerciseList}
+
+For EACH exercise, provide:
+1. exerciseIndex: The index number from the list above (starting at 0)
+2. name: The correct, specific exercise name (e.g., "Dumbbell Romanian Deadlift" not just "Deadlift")
+3. description: A 2-3 sentence description of how the exercise is being performed
+4. muscleGroups: Array of primary muscle groups targeted (use standard anatomy terms)
+5. equipment: Array of equipment used (empty array if bodyweight only)
+6. difficulty: "beginner", "intermediate", or "advanced"
+7. category: One of "strength", "cardio", "flexibility", "warmup", "cooldown", "plyometric"
+8. repCount: Number of reps performed (null if not applicable, e.g., for holds or cardio)
+9. setCount: Number of sets visible in this segment (null if not clearly distinguishable)
+10. formNotes: Brief assessment of the client's exercise form — what looks good and what could improve
+11. coachingCues: Array of 2-3 verbal coaching cues a trainer might give
+
+Return as a JSON array with one object per exercise, in the same order as listed above:
+{
+  "exercises": [
+    {
+      "exerciseIndex": 0,
+      "name": "Exercise Name",
+      "description": "Description...",
+      "muscleGroups": ["muscle1", "muscle2"],
+      "equipment": ["equipment1"],
+      "difficulty": "intermediate",
+      "category": "strength",
+      "repCount": 10,
+      "setCount": 3,
+      "formNotes": "Form notes...",
+      "coachingCues": ["Cue 1", "Cue 2"]
+    }
+  ]
+}`;
+}

@@ -1,19 +1,18 @@
 import {
   ai,
-  GEMINI_MODEL,
   GEMINI_FLASH_MODEL,
   uploadVideoToGemini,
   deleteGeminiFile,
+  createVideoCache,
+  deleteVideoCache,
   withRetry,
-  rateLimitDelay,
 } from "./client";
-import { OVERVIEW_PROMPT, exerciseDetailPrompt } from "./prompts";
+import { OVERVIEW_PROMPT, allExercisesDetailPrompt } from "./prompts";
 import {
   ExerciseOverviewSchema,
-  ExerciseDetailSchema,
+  AllExerciseDetailsSchema,
   type ExerciseOverview,
   type ExerciseDetail,
-  type ExerciseOverviewItem,
 } from "./schemas";
 
 export interface AnalysisCallbacks {
@@ -21,25 +20,22 @@ export interface AnalysisCallbacks {
 }
 
 export async function analyzeSessionOverview(
-  fileUri: string,
-  mimeType: string,
+  cacheName: string,
   callbacks?: AnalysisCallbacks
 ): Promise<ExerciseOverview> {
   callbacks?.onStatusChange("analyzing", "Running overview analysis...");
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_FLASH_MODEL,
       contents: [
         {
           role: "user",
-          parts: [
-            { fileData: { fileUri, mimeType } },
-            { text: OVERVIEW_PROMPT },
-          ],
+          parts: [{ text: OVERVIEW_PROMPT }],
         },
       ],
       config: {
+        cachedContent: cacheName,
         responseMimeType: "application/json",
         temperature: 0.1,
       },
@@ -51,32 +47,25 @@ export async function analyzeSessionOverview(
   }, "overview");
 }
 
-export async function analyzeExerciseDetail(
-  fileUri: string,
-  mimeType: string,
-  exercise: ExerciseOverviewItem
-): Promise<ExerciseDetail> {
-  const prompt = exerciseDetailPrompt(
-    exercise.startTimestamp,
-    exercise.endTimestamp,
-    exercise.label
-  );
+export async function analyzeAllExerciseDetails(
+  cacheName: string,
+  exercises: { startTimestamp: string; endTimestamp: string; label: string }[]
+): Promise<ExerciseDetail[]> {
+  const prompt = allExercisesDetailPrompt(exercises);
 
   return withRetry(async () => {
     const response = await ai.models.generateContent({
-      // Use flash model for detail passes — much higher rate limits,
+      // Use flash model for detail pass — higher rate limits,
       // still excellent quality for per-exercise analysis
       model: GEMINI_FLASH_MODEL,
       contents: [
         {
           role: "user",
-          parts: [
-            { fileData: { fileUri, mimeType } },
-            { text: prompt },
-          ],
+          parts: [{ text: prompt }],
         },
       ],
       config: {
+        cachedContent: cacheName,
         responseMimeType: "application/json",
         temperature: 0.1,
       },
@@ -84,8 +73,14 @@ export async function analyzeExerciseDetail(
 
     const text = response.text ?? "";
     const parsed = JSON.parse(text);
-    return ExerciseDetailSchema.parse(parsed);
-  }, `detail:${exercise.label}`);
+    const result = AllExerciseDetailsSchema.parse(parsed);
+
+    // Sort by exerciseIndex and strip the index field to return clean ExerciseDetail[]
+    const sorted = result.exercises.sort(
+      (a, b) => a.exerciseIndex - b.exerciseIndex
+    );
+    return sorted.map(({ exerciseIndex: _, ...detail }) => detail);
+  }, "all-exercise-details");
 }
 
 export async function runFullAnalysis(
@@ -98,35 +93,25 @@ export async function runFullAnalysis(
   const fileUri = file.uri!;
   const mimeType = file.mimeType || "video/mp4";
 
-  try {
-    // Step 2: Overview pass (uses pro model)
-    const overview = await analyzeSessionOverview(fileUri, mimeType, callbacks);
+  // Step 2: Create context cache so subsequent calls use cached tokens
+  callbacks?.onStatusChange("analyzing", "Creating video cache...");
+  // Cache must use the same model as all generateContent calls
+  // Using flash for everything — higher rate limits and caches are model-specific
+  const cache = await createVideoCache(fileUri, mimeType, GEMINI_FLASH_MODEL);
+  const cacheName = cache.name!;
 
-    // Step 3: Detail pass for each non-rest exercise (uses flash model)
+  try {
+    // Step 3: Overview pass (uses flash model via cache)
+    const overview = await analyzeSessionOverview(cacheName, callbacks);
+
+    // Step 4: Combined detail pass for all non-rest exercises (uses flash model)
     const realExercises = overview.exercises.filter((e) => !e.isRestPeriod);
     callbacks?.onStatusChange(
       "analyzing",
       `Analyzing ${realExercises.length} exercises in detail...`
     );
 
-    // Wait after overview before starting detail passes to let quota recover
-    await rateLimitDelay(15, "detail analysis passes");
-
-    const details: ExerciseDetail[] = [];
-    for (let i = 0; i < realExercises.length; i++) {
-      const ex = realExercises[i];
-      callbacks?.onStatusChange(
-        "analyzing",
-        `Analyzing exercise ${i + 1}/${realExercises.length}: ${ex.label}`
-      );
-      const detail = await analyzeExerciseDetail(fileUri, mimeType, ex);
-      details.push(detail);
-
-      // Small delay between detail calls to avoid burst rate limits
-      if (i < realExercises.length - 1) {
-        await rateLimitDelay(5, `exercise ${i + 2}`);
-      }
-    }
+    const details = await analyzeAllExerciseDetails(cacheName, realExercises);
 
     return {
       overview,
@@ -134,9 +119,11 @@ export async function runFullAnalysis(
       realExercises,
       geminiFileUri: fileUri,
       geminiFileName: file.name!,
+      geminiCacheName: cacheName,
     };
   } finally {
-    // Cleanup Gemini file
+    // Cleanup: delete cache and uploaded file
+    await deleteVideoCache(cacheName);
     if (file.name) {
       await deleteGeminiFile(file.name);
     }

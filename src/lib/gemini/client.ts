@@ -37,6 +37,44 @@ export async function deleteGeminiFile(name: string) {
 }
 
 /**
+ * Create a context cache for a video file so all subsequent API calls
+ * reference cached tokens instead of re-ingesting the full video each time.
+ * This dramatically reduces token consumption and avoids 429 rate limits.
+ */
+export async function createVideoCache(
+  fileUri: string,
+  mimeType: string,
+  model: string
+) {
+  console.log("[Gemini] Creating video cache...");
+  const cache = await ai.caches.create({
+    model,
+    config: {
+      contents: [
+        {
+          role: "user",
+          parts: [{ fileData: { fileUri, mimeType } }],
+        },
+      ],
+      ttl: "3600s", // 1 hour — plenty for processing
+      displayName: `bdt-session-${Date.now()}`,
+    },
+  });
+
+  console.log(`[Gemini] Video cache created: ${cache.name}`);
+  return cache;
+}
+
+export async function deleteVideoCache(cacheName: string) {
+  try {
+    await ai.caches.delete({ name: cacheName });
+    console.log(`[Gemini] Video cache deleted: ${cacheName}`);
+  } catch (e) {
+    console.warn("Failed to delete Gemini cache:", e);
+  }
+}
+
+/**
  * Retry wrapper for Gemini API calls that handles 429 rate limit errors.
  * Extracts retryDelay from error when available, otherwise uses exponential backoff.
  */

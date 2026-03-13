@@ -65,6 +65,7 @@ export async function processSession(sessionId: string) {
     await updateSessionStatus(sessionId, "segmenting", {
       overviewAnalysis: JSON.stringify(analysis.overview),
       geminiFileUri: analysis.geminiFileUri,
+      geminiCacheId: analysis.geminiCacheName,
     });
 
     // Extract clips and thumbnails with FFmpeg
