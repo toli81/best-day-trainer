@@ -101,6 +101,46 @@ export async function generateThumbnail(
   });
 }
 
+export async function compressForAnalysis(inputPath: string): Promise<string> {
+  const dir = path.dirname(inputPath);
+  const ext = path.extname(inputPath);
+  const base = path.basename(inputPath, ext);
+  const outputPath = path.join(dir, `${base}-analysis${ext}`);
+
+  console.log(`[ffmpeg] Compressing for analysis: ${inputPath} → ${outputPath}`);
+  const startTime = Date.now();
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions([
+        "-vf", "scale=-2:480",      // 480p height, width auto-even
+        "-c:v", "libx264",
+        "-preset", "ultrafast",      // Speed over compression efficiency
+        "-crf", "32",                // Lower quality is fine for analysis
+        "-c:a", "aac",
+        "-b:a", "64k",              // Low audio bitrate
+        "-movflags", "+faststart",
+      ])
+      .output(outputPath)
+      .on("end", () => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const inputSize = fs.statSync(inputPath).size;
+        const outputSize = fs.statSync(outputPath).size;
+        const ratio = ((1 - outputSize / inputSize) * 100).toFixed(0);
+        console.log(
+          `[ffmpeg] Compression complete in ${elapsed}s: ` +
+          `${(inputSize / 1024 / 1024).toFixed(0)}MB → ${(outputSize / 1024 / 1024).toFixed(0)}MB (${ratio}% reduction)`
+        );
+        resolve(outputPath);
+      })
+      .on("error", (err) => {
+        console.error(`[ffmpeg] Compression failed: ${err.message}`);
+        reject(err);
+      })
+      .run();
+  });
+}
+
 export async function getVideoDuration(videoPath: string): Promise<number> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(videoPath, (err, metadata) => {

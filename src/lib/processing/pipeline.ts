@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { runFullAnalysis } from "@/lib/gemini/analyze-session";
-import { extractClip, generateThumbnail, getVideoDuration } from "@/lib/video/ffmpeg";
+import { extractClip, generateThumbnail, getVideoDuration, compressForAnalysis } from "@/lib/video/ffmpeg";
 import { generateSessionNotes } from "@/lib/claude/session-notes";
 import { standardizeAndTagExercises } from "@/lib/claude/library-manager";
 import { updateSessionStatus, createExercises, getSession } from "@/lib/db/queries";
@@ -17,6 +17,7 @@ export async function processSession(sessionId: string) {
 
   const isR2 = session.videoFilePath.startsWith("r2://");
   let videoPath: string;
+  let analysisVideoPath: string = "";
   let clipsDir: string;
 
   if (isR2) {
@@ -54,8 +55,17 @@ export async function processSession(sessionId: string) {
       });
     }
 
+    // Compress video for Gemini analysis (480p, low bitrate — much faster upload)
+    console.log(`[${sessionId}] Compressing video for analysis...`);
+    try {
+      analysisVideoPath = await compressForAnalysis(videoPath);
+    } catch (err) {
+      console.warn(`[${sessionId}] Compression failed, using original:`, err);
+      analysisVideoPath = videoPath;
+    }
+
     // Run Gemini analysis (overview + per-exercise detail)
-    const analysis = await runFullAnalysis(videoPath, {
+    const analysis = await runFullAnalysis(analysisVideoPath, {
       onStatusChange: async (status, detail) => {
         console.log(`[${sessionId}] ${status}: ${detail}`);
       },
@@ -192,6 +202,13 @@ export async function processSession(sessionId: string) {
   } finally {
     // Clean up temp files for R2 sessions
     if (isR2) {
+      try {
+        if (analysisVideoPath && analysisVideoPath !== videoPath && fs.existsSync(analysisVideoPath)) {
+          fs.unlinkSync(analysisVideoPath);
+        }
+      } catch (err) {
+        console.warn(`Failed to clean up compressed video: ${err}`);
+      }
       try {
         if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
       } catch (err) {
