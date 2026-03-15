@@ -8,7 +8,7 @@ if (!process.env.GEMINI_API_KEY) {
 export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export const GEMINI_MODEL = "gemini-2.5-pro";
-export const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+export const GEMINI_FLASH_MODEL = "gemini-2.0-flash";
 
 /**
  * Race a promise against a timeout. Rejects with a clear error if the timeout fires first.

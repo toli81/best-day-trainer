@@ -177,14 +177,13 @@ export async function uploadAndCache(
   const fileUri = file.uri!;
   const mimeType = file.mimeType || "video/mp4";
 
-  // Step 2: Try context cache (may return null if model doesn't support it)
-  callbacks?.onStatusChange("analyzing", "Creating video cache...");
-  const cache = await createVideoCache(fileUri, mimeType, GEMINI_FLASH_MODEL);
+  // Skip caching — use direct file reference for simplicity and reliability
+  console.log(`[Gemini] File uploaded, using direct file reference (no cache)`);
 
   return {
     geminiFileUri: fileUri,
     geminiFileName: file.name!,
-    geminiCacheName: cache?.name ?? null,
+    geminiCacheName: null,
     geminiMimeType: mimeType,
   };
 }

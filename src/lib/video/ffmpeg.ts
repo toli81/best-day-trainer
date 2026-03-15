@@ -157,7 +157,7 @@ export async function generateThumbnail(
  * We target 3,800 seconds (~63 min) to leave headroom for the prompt.
  * If the video is longer, we speed it up proportionally.
  */
-const MAX_ANALYSIS_DURATION_SEC = 3800; // ~63 min, leaves room for prompt tokens
+const MAX_ANALYSIS_DURATION_SEC = 3000; // ~50 min, leaves plenty of headroom for prompt tokens
 
 export interface CompressionResult {
   outputPath: string;
