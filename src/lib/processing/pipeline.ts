@@ -106,12 +106,10 @@ export async function processSession(sessionId: string) {
         pipelineStage: "downloaded",
         durationSeconds: duration > 0 ? Math.round(duration) : undefined,
       });
-    } else if (isR2 && stageReached(stage, "downloaded") && !stageReached(stage, "compressed")) {
-      // Resuming: need to re-download since /tmp doesn't persist across restarts
-      if (!fs.existsSync(videoPath)) {
-        console.log(`[${sessionId}] Resuming: re-downloading from R2...`);
-        await downloadToFile(r2Key, videoPath);
-      }
+    } else if (isR2 && stageReached(stage, "downloaded") && !fs.existsSync(videoPath)) {
+      // Resuming: re-download since /tmp doesn't persist across restarts or retries
+      console.log(`[${sessionId}] Resuming: re-downloading from R2...`);
+      await downloadToFile(r2Key, videoPath);
     }
 
     // ─── Stage 2: Compress for analysis ───
