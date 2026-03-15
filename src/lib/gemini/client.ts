@@ -10,6 +10,34 @@ export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 export const GEMINI_MODEL = "gemini-2.5-pro";
 export const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
 
+/**
+ * Race a promise against a timeout. Rejects with a clear error if the timeout fires first.
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`[Timeout] ${label} timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+// Timeout constants (milliseconds)
+const UPLOAD_TIMEOUT = 10 * 60 * 1000;   // 10 minutes for video upload
+const POLL_TIMEOUT = 15 * 60 * 1000;     // 15 minutes for processing poll
+const CACHE_TIMEOUT = 5 * 60 * 1000;     // 5 minutes for cache creation
+const OVERVIEW_TIMEOUT = 5 * 60 * 1000;  // 5 minutes for overview analysis
+const DETAIL_TIMEOUT = 3 * 60 * 1000;    // 3 minutes per detail batch
+
+export { OVERVIEW_TIMEOUT, DETAIL_TIMEOUT };
+
 export async function uploadVideoToGemini(filePath: string, mimeType = "video/mp4") {
   const fileSize = fs.statSync(filePath).size;
   const fileSizeMB = (fileSize / 1024 / 1024).toFixed(1);
@@ -22,17 +50,22 @@ export async function uploadVideoToGemini(filePath: string, mimeType = "video/mp
     try {
       console.log(`[Gemini] Upload attempt ${attempt}/${maxRetries}...`);
 
-      const uploadResult = await ai.files.upload({
-        file: filePath,
-        config: { mimeType },
-      });
+      const uploadResult = await withTimeout(
+        ai.files.upload({ file: filePath, config: { mimeType } }),
+        UPLOAD_TIMEOUT,
+        `Gemini upload (${fileSizeMB}MB)`
+      );
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`[Gemini] Upload completed in ${elapsed}s. File: ${uploadResult.name}, State: ${uploadResult.state}`);
 
-      // Poll for processing completion
+      // Poll for processing completion with overall timeout
       let file = uploadResult;
+      const pollStart = Date.now();
       while (file.state === "PROCESSING") {
+        if (Date.now() - pollStart > POLL_TIMEOUT) {
+          throw new Error(`Gemini file processing timed out after ${Math.round(POLL_TIMEOUT / 60000)} minutes`);
+        }
         console.log(`[Gemini] File still processing, waiting 5s...`);
         await new Promise((r) => setTimeout(r, 5000));
         file = await ai.files.get({ name: file.name! });
@@ -88,19 +121,23 @@ export async function createVideoCache(
   model: string
 ) {
   console.log("[Gemini] Creating video cache...");
-  const cache = await ai.caches.create({
-    model,
-    config: {
-      contents: [
-        {
-          role: "user",
-          parts: [{ fileData: { fileUri, mimeType } }],
-        },
-      ],
-      ttl: "3600s", // 1 hour — plenty for processing
-      displayName: `bdt-session-${Date.now()}`,
-    },
-  });
+  const cache = await withTimeout(
+    ai.caches.create({
+      model,
+      config: {
+        contents: [
+          {
+            role: "user",
+            parts: [{ fileData: { fileUri, mimeType } }],
+          },
+        ],
+        ttl: "3600s", // 1 hour — plenty for processing
+        displayName: `bdt-session-${Date.now()}`,
+      },
+    }),
+    CACHE_TIMEOUT,
+    "Gemini cache creation"
+  );
 
   console.log(`[Gemini] Video cache created: ${cache.name}`);
   return cache;

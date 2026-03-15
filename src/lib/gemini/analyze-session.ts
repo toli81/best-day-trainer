@@ -6,6 +6,9 @@ import {
   createVideoCache,
   deleteVideoCache,
   withRetry,
+  withTimeout,
+  OVERVIEW_TIMEOUT,
+  DETAIL_TIMEOUT,
 } from "./client";
 import { OVERVIEW_PROMPT, allExercisesDetailPrompt } from "./prompts";
 import {
@@ -26,20 +29,24 @@ export async function analyzeSessionOverview(
   callbacks?.onStatusChange("analyzing", "Running overview analysis...");
 
   return withRetry(async () => {
-    const response = await ai.models.generateContent({
-      model: GEMINI_FLASH_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: OVERVIEW_PROMPT }],
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: GEMINI_FLASH_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: OVERVIEW_PROMPT }],
+          },
+        ],
+        config: {
+          cachedContent: cacheName,
+          responseMimeType: "application/json",
+          temperature: 0.1,
         },
-      ],
-      config: {
-        cachedContent: cacheName,
-        responseMimeType: "application/json",
-        temperature: 0.1,
-      },
-    });
+      }),
+      OVERVIEW_TIMEOUT,
+      "Gemini overview analysis"
+    );
 
     const text = response.text ?? "";
     const parsed = JSON.parse(text);
@@ -47,43 +54,89 @@ export async function analyzeSessionOverview(
   }, "overview");
 }
 
-export async function analyzeAllExerciseDetails(
+/**
+ * Analyze a batch of exercises (typically 3 at a time) instead of all at once.
+ * This reduces inference time, token payload, and failure rate per call.
+ */
+export async function analyzeExerciseBatch(
   cacheName: string,
   exercises: { startTimestamp: string; endTimestamp: string; label: string }[]
 ): Promise<ExerciseDetail[]> {
   const prompt = allExercisesDetailPrompt(exercises);
 
   return withRetry(async () => {
-    const response = await ai.models.generateContent({
-      // Use flash model for detail pass — higher rate limits,
-      // still excellent quality for per-exercise analysis
-      model: GEMINI_FLASH_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: GEMINI_FLASH_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+        config: {
+          cachedContent: cacheName,
+          responseMimeType: "application/json",
+          temperature: 0.1,
         },
-      ],
-      config: {
-        cachedContent: cacheName,
-        responseMimeType: "application/json",
-        temperature: 0.1,
-      },
-    });
+      }),
+      DETAIL_TIMEOUT,
+      `Gemini detail batch (${exercises.length} exercises)`
+    );
 
     const text = response.text ?? "";
     const parsed = JSON.parse(text);
     const result = AllExerciseDetailsSchema.parse(parsed);
 
-    // Sort by exerciseIndex and strip the index field to return clean ExerciseDetail[]
+    // Sort by exerciseIndex and strip the index field
     const sorted = result.exercises.sort(
       (a, b) => a.exerciseIndex - b.exerciseIndex
     );
     return sorted.map(({ exerciseIndex: _, ...detail }) => detail);
-  }, "all-exercise-details");
+  }, `detail-batch-${exercises[0]?.label ?? "unknown"}`);
 }
 
-export async function runFullAnalysis(
+/**
+ * Run detail analysis in sequential batches of `batchSize` exercises.
+ * Sequential to avoid Gemini rate limits on the same cache.
+ * If a batch fails, we know exactly which exercises succeeded.
+ */
+export async function runDetailAnalysisInBatches(
+  cacheName: string,
+  exercises: { startTimestamp: string; endTimestamp: string; label: string }[],
+  callbacks?: AnalysisCallbacks,
+  batchSize = 3
+): Promise<ExerciseDetail[]> {
+  const allDetails: ExerciseDetail[] = [];
+  const totalBatches = Math.ceil(exercises.length / batchSize);
+
+  for (let i = 0; i < exercises.length; i += batchSize) {
+    const batch = exercises.slice(i, i + batchSize);
+    const batchNum = Math.floor(i / batchSize) + 1;
+
+    callbacks?.onStatusChange(
+      "analyzing",
+      `Analyzing exercises batch ${batchNum}/${totalBatches} (${batch.map(e => e.label).join(", ")})...`
+    );
+
+    console.log(`[Gemini] Detail batch ${batchNum}/${totalBatches}: ${batch.map(e => e.label).join(", ")}`);
+    const batchDetails = await analyzeExerciseBatch(cacheName, batch);
+    allDetails.push(...batchDetails);
+
+    // Brief pause between batches to avoid rate limits
+    if (i + batchSize < exercises.length) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  return allDetails;
+}
+
+/**
+ * Upload video to Gemini and create context cache.
+ * Returns handles for the pipeline to persist and manage cleanup.
+ */
+export async function uploadAndCache(
   videoFilePath: string,
   callbacks?: AnalysisCallbacks
 ) {
@@ -93,39 +146,55 @@ export async function runFullAnalysis(
   const fileUri = file.uri!;
   const mimeType = file.mimeType || "video/mp4";
 
-  // Step 2: Create context cache so subsequent calls use cached tokens
+  // Step 2: Create context cache
   callbacks?.onStatusChange("analyzing", "Creating video cache...");
-  // Cache must use the same model as all generateContent calls
-  // Using flash for everything — higher rate limits and caches are model-specific
   const cache = await createVideoCache(fileUri, mimeType, GEMINI_FLASH_MODEL);
-  const cacheName = cache.name!;
 
-  try {
-    // Step 3: Overview pass (uses flash model via cache)
-    const overview = await analyzeSessionOverview(cacheName, callbacks);
+  return {
+    geminiFileUri: fileUri,
+    geminiFileName: file.name!,
+    geminiCacheName: cache.name!,
+  };
+}
 
-    // Step 4: Combined detail pass for all non-rest exercises (uses flash model)
-    const realExercises = overview.exercises.filter((e) => !e.isRestPeriod);
-    callbacks?.onStatusChange(
-      "analyzing",
-      `Analyzing ${realExercises.length} exercises in detail...`
-    );
+/**
+ * Clean up Gemini resources (cache + uploaded file).
+ * Called by the pipeline after all processing is complete or on unrecoverable failure.
+ */
+export async function cleanupGeminiResources(
+  cacheName?: string | null,
+  fileName?: string | null
+) {
+  if (cacheName) await deleteVideoCache(cacheName);
+  if (fileName) await deleteGeminiFile(fileName);
+}
 
-    const details = await analyzeAllExerciseDetails(cacheName, realExercises);
+// Keep the old function for backward compatibility but it now delegates to the new functions
+export async function runFullAnalysis(
+  videoFilePath: string,
+  callbacks?: AnalysisCallbacks
+) {
+  const { geminiFileUri, geminiFileName, geminiCacheName } =
+    await uploadAndCache(videoFilePath, callbacks);
 
-    return {
-      overview,
-      details,
-      realExercises,
-      geminiFileUri: fileUri,
-      geminiFileName: file.name!,
-      geminiCacheName: cacheName,
-    };
-  } finally {
-    // Cleanup: delete cache and uploaded file
-    await deleteVideoCache(cacheName);
-    if (file.name) {
-      await deleteGeminiFile(file.name);
-    }
-  }
+  // Overview pass
+  const overview = await analyzeSessionOverview(geminiCacheName, callbacks);
+
+  // Detail pass in batches
+  const realExercises = overview.exercises.filter((e) => !e.isRestPeriod);
+  const details = await runDetailAnalysisInBatches(
+    geminiCacheName,
+    realExercises,
+    callbacks
+  );
+
+  // NOTE: No cleanup here — the pipeline owns cleanup now
+  return {
+    overview,
+    details,
+    realExercises,
+    geminiFileUri,
+    geminiFileName,
+    geminiCacheName,
+  };
 }

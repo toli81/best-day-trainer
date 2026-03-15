@@ -30,8 +30,11 @@ export const sessions = sqliteTable("sessions", {
 
   geminiFileUri: text("gemini_file_uri"),
   geminiCacheId: text("gemini_cache_id"),
+  geminiFileName: text("gemini_file_name"),
   overviewAnalysis: text("overview_analysis"),
+  detailsAnalysis: text("details_analysis"),
   sessionNotes: text("session_notes"),
+  pipelineStage: text("pipeline_stage"),
   tokenCount: integer("token_count"),
 
   createdAt: text("created_at").notNull(),

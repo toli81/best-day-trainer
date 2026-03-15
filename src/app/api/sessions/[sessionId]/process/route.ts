@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processSession } from "@/lib/processing/pipeline";
+import { processSession, isProcessing, getProcessingSessionId } from "@/lib/processing/pipeline";
 import { getSession } from "@/lib/db/queries";
 
 export async function POST(
@@ -20,7 +20,16 @@ export async function POST(
     );
   }
 
+  // Concurrency check — only one session can process at a time
+  if (isProcessing()) {
+    return NextResponse.json(
+      { error: `Another session (${getProcessingSessionId()}) is already processing. Please wait for it to finish.` },
+      { status: 409 }
+    );
+  }
+
   // Run processing in the background (don't await)
+  // This works for both fresh sessions ("uploaded") and retries ("error" with pipelineStage)
   processSession(sessionId).catch((err) => {
     console.error(`Background processing failed for ${sessionId}:`, err);
   });

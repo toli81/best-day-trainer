@@ -49,7 +49,7 @@ Tag categories to consider:
         content: `Standardize names and add tags for these exercises:\n${exerciseList}`,
       },
     ],
-  });
+  }, { timeout: 120_000 });
 
   const textBlock = message.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") return [];

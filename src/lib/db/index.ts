@@ -39,8 +39,11 @@ function initDb() {
       processing_completed_at TEXT,
       gemini_file_uri TEXT,
       gemini_cache_id TEXT,
+      gemini_file_name TEXT,
       overview_analysis TEXT,
+      details_analysis TEXT,
       session_notes TEXT,
+      pipeline_stage TEXT,
       token_count INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -72,6 +75,29 @@ function initDb() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+  `);
+
+  // Migrations: add new columns safely (SQLite ALTER TABLE ADD COLUMN is safe)
+  const migrations = [
+    "ALTER TABLE sessions ADD COLUMN gemini_file_name TEXT",
+    "ALTER TABLE sessions ADD COLUMN details_analysis TEXT",
+    "ALTER TABLE sessions ADD COLUMN pipeline_stage TEXT",
+  ];
+  for (const m of migrations) {
+    try {
+      _sqlite.exec(m);
+    } catch {
+      // Column already exists — safe to ignore
+    }
+  }
+
+  // Recover sessions stuck in processing states (e.g., from server restart)
+  _sqlite.exec(`
+    UPDATE sessions
+    SET status = 'error',
+        processing_error = 'Processing interrupted by server restart — click Retry to resume',
+        updated_at = datetime('now')
+    WHERE status IN ('analyzing', 'segmenting', 'generating_notes')
   `);
 
   _db = drizzle(_sqlite, { schema });

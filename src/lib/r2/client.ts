@@ -106,19 +106,31 @@ export async function getPresignedGetUrl(key: string, expiresIn = 3600): Promise
   return getSignedUrl(r2, cmd, { expiresIn });
 }
 
-/** Download an R2 object to a local file path (for FFmpeg processing). */
+/** Download an R2 object to a local file path (for FFmpeg processing). 5-minute timeout. */
 export async function downloadToFile(key: string, localPath: string) {
-  const cmd = new GetObjectCommand({
-    Bucket: R2_BUCKET,
-    Key: key,
-  });
-  const res = await r2.send(cmd);
+  const DOWNLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
-  if (!res.Body) throw new Error(`R2 object ${key} has no body`);
+  const downloadPromise = async () => {
+    const cmd = new GetObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+    });
+    const res = await r2.send(cmd);
 
-  const nodeStream = res.Body as Readable;
-  const writeStream = fs.createWriteStream(localPath);
-  await pipeline(nodeStream, writeStream);
+    if (!res.Body) throw new Error(`R2 object ${key} has no body`);
+
+    const nodeStream = res.Body as Readable;
+    const writeStream = fs.createWriteStream(localPath);
+    await pipeline(nodeStream, writeStream);
+  };
+
+  // Race against timeout
+  await Promise.race([
+    downloadPromise(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`[Timeout] R2 download of ${key} timed out after 5 minutes`)), DOWNLOAD_TIMEOUT)
+    ),
+  ]);
 }
 
 /** Delete an object from R2. */

@@ -44,7 +44,7 @@ Exercises performed:
 ${exerciseList}`,
       },
     ],
-  });
+  }, { timeout: 120_000 });
 
   const textBlock = message.content.find((b) => b.type === "text");
   return textBlock?.text || "Unable to generate session notes.";

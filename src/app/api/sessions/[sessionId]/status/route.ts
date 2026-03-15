@@ -17,5 +17,6 @@ export async function GET(
     exerciseCount: session.exercises?.length ?? 0,
     processingError: session.processingError,
     hasNotes: !!session.sessionNotes,
+    pipelineStage: session.pipelineStage ?? null,
   });
 }

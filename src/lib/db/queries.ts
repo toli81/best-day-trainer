@@ -40,8 +40,11 @@ export async function updateSessionStatus(
     processingCompletedAt: string;
     geminiFileUri: string;
     geminiCacheId: string;
+    geminiFileName: string;
     overviewAnalysis: string;
+    detailsAnalysis: string;
     sessionNotes: string;
+    pipelineStage: string;
     tokenCount: number;
     durationSeconds: number;
   }>
