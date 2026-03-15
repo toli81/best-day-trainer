@@ -114,6 +114,8 @@ export async function deleteGeminiFile(name: string) {
  * Create a context cache for a video file so all subsequent API calls
  * reference cached tokens instead of re-ingesting the full video each time.
  * This dramatically reduces token consumption and avoids 429 rate limits.
+ *
+ * Returns null if the model doesn't support caching (e.g. gemini-2.5-flash).
  */
 export async function createVideoCache(
   fileUri: string,
@@ -121,26 +123,35 @@ export async function createVideoCache(
   model: string
 ) {
   console.log("[Gemini] Creating video cache...");
-  const cache = await withTimeout(
-    ai.caches.create({
-      model,
-      config: {
-        contents: [
-          {
-            role: "user",
-            parts: [{ fileData: { fileUri, mimeType } }],
-          },
-        ],
-        ttl: "3600s", // 1 hour — plenty for processing
-        displayName: `bdt-session-${Date.now()}`,
-      },
-    }),
-    CACHE_TIMEOUT,
-    "Gemini cache creation"
-  );
+  try {
+    const cache = await withTimeout(
+      ai.caches.create({
+        model,
+        config: {
+          contents: [
+            {
+              role: "user",
+              parts: [{ fileData: { fileUri, mimeType } }],
+            },
+          ],
+          ttl: "3600s", // 1 hour — plenty for processing
+          displayName: `bdt-session-${Date.now()}`,
+        },
+      }),
+      CACHE_TIMEOUT,
+      "Gemini cache creation"
+    );
 
-  console.log(`[Gemini] Video cache created: ${cache.name}`);
-  return cache;
+    console.log(`[Gemini] Video cache created: ${cache.name}`);
+    return cache;
+  } catch (err) {
+    const errStr = String(err);
+    if (errStr.includes("too large") || errStr.includes("max_total_token_count") || errStr.includes("INVALID_ARGUMENT")) {
+      console.warn(`[Gemini] Caching not supported for this model/video, will use direct file reference: ${errStr}`);
+      return null;
+    }
+    throw err; // Re-throw unexpected errors
+  }
 }
 
 export async function deleteVideoCache(cacheName: string) {

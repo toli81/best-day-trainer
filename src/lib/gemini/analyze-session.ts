@@ -22,11 +22,49 @@ export interface AnalysisCallbacks {
   onStatusChange: (status: string, detail?: string) => void;
 }
 
+/**
+ * Video reference for analysis — either a cache name or direct file URI.
+ * When caching isn't supported (e.g. gemini-2.5-flash), we pass the file inline.
+ */
+export interface VideoRef {
+  cacheName?: string | null;
+  fileUri?: string;
+  mimeType?: string;
+}
+
+/**
+ * Build the content config for a Gemini call.
+ * Uses cached content when available, otherwise inlines the video file.
+ */
+function buildVideoConfig(ref: VideoRef) {
+  if (ref.cacheName) {
+    return {
+      config: {
+        cachedContent: ref.cacheName,
+        responseMimeType: "application/json" as const,
+        temperature: 0.1,
+      },
+      videoParts: [] as { fileData: { fileUri: string; mimeType: string } }[],
+    };
+  }
+  // Direct file reference — include video as a part in the request
+  return {
+    config: {
+      responseMimeType: "application/json" as const,
+      temperature: 0.1,
+    },
+    videoParts: [
+      { fileData: { fileUri: ref.fileUri!, mimeType: ref.mimeType || "video/mp4" } },
+    ],
+  };
+}
+
 export async function analyzeSessionOverview(
-  cacheName: string,
+  videoRef: VideoRef,
   callbacks?: AnalysisCallbacks
 ): Promise<ExerciseOverview> {
   callbacks?.onStatusChange("analyzing", "Running overview analysis...");
+  const { config, videoParts } = buildVideoConfig(videoRef);
 
   return withRetry(async () => {
     const response = await withTimeout(
@@ -35,14 +73,10 @@ export async function analyzeSessionOverview(
         contents: [
           {
             role: "user",
-            parts: [{ text: OVERVIEW_PROMPT }],
+            parts: [...videoParts, { text: OVERVIEW_PROMPT }],
           },
         ],
-        config: {
-          cachedContent: cacheName,
-          responseMimeType: "application/json",
-          temperature: 0.1,
-        },
+        config,
       }),
       OVERVIEW_TIMEOUT,
       "Gemini overview analysis"
@@ -59,10 +93,11 @@ export async function analyzeSessionOverview(
  * This reduces inference time, token payload, and failure rate per call.
  */
 export async function analyzeExerciseBatch(
-  cacheName: string,
+  videoRef: VideoRef,
   exercises: { startTimestamp: string; endTimestamp: string; label: string }[]
 ): Promise<ExerciseDetail[]> {
   const prompt = allExercisesDetailPrompt(exercises);
+  const { config, videoParts } = buildVideoConfig(videoRef);
 
   return withRetry(async () => {
     const response = await withTimeout(
@@ -71,14 +106,10 @@ export async function analyzeExerciseBatch(
         contents: [
           {
             role: "user",
-            parts: [{ text: prompt }],
+            parts: [...videoParts, { text: prompt }],
           },
         ],
-        config: {
-          cachedContent: cacheName,
-          responseMimeType: "application/json",
-          temperature: 0.1,
-        },
+        config,
       }),
       DETAIL_TIMEOUT,
       `Gemini detail batch (${exercises.length} exercises)`
@@ -102,7 +133,7 @@ export async function analyzeExerciseBatch(
  * If a batch fails, we know exactly which exercises succeeded.
  */
 export async function runDetailAnalysisInBatches(
-  cacheName: string,
+  videoRef: VideoRef,
   exercises: { startTimestamp: string; endTimestamp: string; label: string }[],
   callbacks?: AnalysisCallbacks,
   batchSize = 3
@@ -120,7 +151,7 @@ export async function runDetailAnalysisInBatches(
     );
 
     console.log(`[Gemini] Detail batch ${batchNum}/${totalBatches}: ${batch.map(e => e.label).join(", ")}`);
-    const batchDetails = await analyzeExerciseBatch(cacheName, batch);
+    const batchDetails = await analyzeExerciseBatch(videoRef, batch);
     allDetails.push(...batchDetails);
 
     // Brief pause between batches to avoid rate limits
@@ -146,14 +177,15 @@ export async function uploadAndCache(
   const fileUri = file.uri!;
   const mimeType = file.mimeType || "video/mp4";
 
-  // Step 2: Create context cache
+  // Step 2: Try context cache (may return null if model doesn't support it)
   callbacks?.onStatusChange("analyzing", "Creating video cache...");
   const cache = await createVideoCache(fileUri, mimeType, GEMINI_FLASH_MODEL);
 
   return {
     geminiFileUri: fileUri,
     geminiFileName: file.name!,
-    geminiCacheName: cache.name!,
+    geminiCacheName: cache?.name ?? null,
+    geminiMimeType: mimeType,
   };
 }
 
@@ -174,16 +206,22 @@ export async function runFullAnalysis(
   videoFilePath: string,
   callbacks?: AnalysisCallbacks
 ) {
-  const { geminiFileUri, geminiFileName, geminiCacheName } =
+  const { geminiFileUri, geminiFileName, geminiCacheName, geminiMimeType } =
     await uploadAndCache(videoFilePath, callbacks);
 
+  const videoRef: VideoRef = {
+    cacheName: geminiCacheName,
+    fileUri: geminiFileUri,
+    mimeType: geminiMimeType,
+  };
+
   // Overview pass
-  const overview = await analyzeSessionOverview(geminiCacheName, callbacks);
+  const overview = await analyzeSessionOverview(videoRef, callbacks);
 
   // Detail pass in batches
   const realExercises = overview.exercises.filter((e) => !e.isRestPeriod);
   const details = await runDetailAnalysisInBatches(
-    geminiCacheName,
+    videoRef,
     realExercises,
     callbacks
   );

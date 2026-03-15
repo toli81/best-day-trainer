@@ -39,7 +39,7 @@ export async function updateSessionStatus(
     processingStartedAt: string;
     processingCompletedAt: string;
     geminiFileUri: string;
-    geminiCacheId: string;
+    geminiCacheId: string | null;
     geminiFileName: string;
     overviewAnalysis: string;
     detailsAnalysis: string;

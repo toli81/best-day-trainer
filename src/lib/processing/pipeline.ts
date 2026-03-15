@@ -16,7 +16,7 @@ import { parseTimestamp } from "@/lib/utils/timestamps";
 import { downloadToFile, uploadFile } from "@/lib/r2/client";
 import type { NewExercise } from "@/lib/db/schema";
 import type { ExerciseOverview, ExerciseDetail } from "@/lib/gemini/schemas";
-import type { AnalysisCallbacks } from "@/lib/gemini/analyze-session";
+import type { AnalysisCallbacks, VideoRef } from "@/lib/gemini/analyze-session";
 
 // Pipeline stage ordering for checkpoint comparison
 const STAGE_ORDER = [
@@ -133,6 +133,7 @@ export async function processSession(sessionId: string) {
     let geminiFileUri = session.geminiFileUri;
     let geminiFileName = session.geminiFileName;
     let geminiCacheName = session.geminiCacheId;
+    let geminiMimeType = "video/mp4";
 
     if (!stageReached(stage, "uploaded_to_gemini")) {
       console.log(`[${sessionId}] Stage 3: Uploading to Gemini and creating cache...`);
@@ -143,6 +144,7 @@ export async function processSession(sessionId: string) {
       geminiFileUri = gemini.geminiFileUri;
       geminiFileName = gemini.geminiFileName;
       geminiCacheName = gemini.geminiCacheName;
+      geminiMimeType = gemini.geminiMimeType;
 
       await updateSessionStatus(sessionId, "analyzing", {
         pipelineStage: "uploaded_to_gemini",
@@ -152,12 +154,20 @@ export async function processSession(sessionId: string) {
       });
     }
 
+    // Build video reference for analysis calls (cache or direct file)
+    const videoRef: VideoRef = {
+      cacheName: geminiCacheName,
+      fileUri: geminiFileUri!,
+      mimeType: geminiMimeType,
+    };
+    console.log(`[${sessionId}] Using ${geminiCacheName ? "cached" : "direct file"} mode for analysis`);
+
     // ─── Stage 4: Overview analysis ───
     let overview: ExerciseOverview;
 
     if (!stageReached(stage, "overview_complete")) {
       console.log(`[${sessionId}] Stage 4: Running overview analysis...`);
-      overview = await analyzeSessionOverview(geminiCacheName!, callbacks);
+      overview = await analyzeSessionOverview(videoRef, callbacks);
       await updateSessionStatus(sessionId, "analyzing", {
         pipelineStage: "overview_complete",
         overviewAnalysis: JSON.stringify(overview),
@@ -175,7 +185,7 @@ export async function processSession(sessionId: string) {
     if (!stageReached(stage, "details_complete")) {
       console.log(`[${sessionId}] Stage 5: Running batched detail analysis for ${realExercises.length} exercises...`);
       details = await runDetailAnalysisInBatches(
-        geminiCacheName!,
+        videoRef,
         realExercises,
         callbacks
       );
