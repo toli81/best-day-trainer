@@ -12,7 +12,7 @@ import { extractClip, generateThumbnail, getVideoDuration, compressForAnalysis }
 import { generateSessionNotes } from "@/lib/claude/session-notes";
 import { standardizeAndTagExercises } from "@/lib/claude/library-manager";
 import { updateSessionStatus, createExercises, getSession } from "@/lib/db/queries";
-import { parseTimestamp } from "@/lib/utils/timestamps";
+import { parseTimestamp, formatTimestamp } from "@/lib/utils/timestamps";
 import { downloadToFile, uploadFile } from "@/lib/r2/client";
 import type { NewExercise } from "@/lib/db/schema";
 import type { ExerciseOverview, ExerciseDetail } from "@/lib/gemini/schemas";
@@ -77,7 +77,12 @@ export async function processSession(sessionId: string) {
     : path.join(process.cwd(), "public", "clips", sessionId);
 
   let analysisVideoPath = "";
-  const stage = session.pipelineStage as PipelineStage | null;
+  // On error retry, reset to start fresh (ensures new compression/upload logic takes effect)
+  let stage = session.pipelineStage as PipelineStage | null;
+  if (session.status === "error") {
+    console.log(`[${sessionId}] Retrying from error — resetting pipeline stage from "${stage}" to start`);
+    stage = null;
+  }
 
   // Callbacks for status updates
   const callbacks: AnalysisCallbacks = {
@@ -113,10 +118,13 @@ export async function processSession(sessionId: string) {
     }
 
     // ─── Stage 2: Compress for analysis ───
+    let speedFactor = 1.0;
     if (!stageReached(stage, "compressed")) {
       console.log(`[${sessionId}] Stage 2: Compressing video for analysis...`);
       try {
-        analysisVideoPath = await compressForAnalysis(videoPath);
+        const result = await compressForAnalysis(videoPath);
+        analysisVideoPath = result.outputPath;
+        speedFactor = result.speedFactor;
       } catch (err) {
         console.warn(`[${sessionId}] Compression failed, using original:`, err);
         analysisVideoPath = videoPath;
@@ -224,8 +232,10 @@ export async function processSession(sessionId: string) {
         }
         const exerciseId = nanoid();
 
-        const startSec = parseTimestamp(overviewEx.startTimestamp);
-        const endSec = parseTimestamp(overviewEx.endTimestamp);
+        // Gemini sees the (possibly sped-up) analysis video, so scale timestamps
+        // back to real time for clip extraction from the original video
+        const startSec = parseTimestamp(overviewEx.startTimestamp) * speedFactor;
+        const endSec = parseTimestamp(overviewEx.endTimestamp) * speedFactor;
         const clipDuration = endSec - startSec;
 
         // Extract clip
@@ -262,8 +272,8 @@ export async function processSession(sessionId: string) {
         exerciseRecords.push({
           id: exerciseId,
           sessionId,
-          startTimestamp: overviewEx.startTimestamp,
-          endTimestamp: overviewEx.endTimestamp,
+          startTimestamp: speedFactor > 1.0 ? formatTimestamp(startSec) : overviewEx.startTimestamp,
+          endTimestamp: speedFactor > 1.0 ? formatTimestamp(endSec) : overviewEx.endTimestamp,
           startSeconds: startSec,
           endSeconds: endSec,
           orderIndex: i,

@@ -147,26 +147,58 @@ export async function generateThumbnail(
   );
 }
 
-export async function compressForAnalysis(inputPath: string): Promise<string> {
+/**
+ * Gemini token budget:
+ * - Video: ~258 tokens per second (1 fps sampling)
+ * - Audio: ~32 tokens per second
+ * - Max context: 1,048,576 tokens
+ *
+ * With audio stripped, we can fit ~4,064 seconds (~67 min).
+ * We target 3,800 seconds (~63 min) to leave headroom for the prompt.
+ * If the video is longer, we speed it up proportionally.
+ */
+const MAX_ANALYSIS_DURATION_SEC = 3800; // ~63 min, leaves room for prompt tokens
+
+export interface CompressionResult {
+  outputPath: string;
+  speedFactor: number; // 1.0 = normal speed, 1.5 = 50% faster, etc.
+}
+
+export async function compressForAnalysis(inputPath: string): Promise<CompressionResult> {
   const dir = path.dirname(inputPath);
   const ext = path.extname(inputPath);
   const base = path.basename(inputPath, ext);
   const outputPath = path.join(dir, `${base}-analysis${ext}`);
 
-  console.log(`[ffmpeg] Compressing for analysis: ${inputPath} → ${outputPath}`);
+  // Get duration to determine if we need to speed up
+  const duration = await getVideoDuration(inputPath);
+  let speedFactor = 1.0;
+  if (duration > MAX_ANALYSIS_DURATION_SEC) {
+    speedFactor = Math.ceil((duration / MAX_ANALYSIS_DURATION_SEC) * 10) / 10; // round up to 1 decimal
+    console.log(`[ffmpeg] Video is ${Math.round(duration)}s (${(duration/60).toFixed(1)}min), ` +
+      `exceeds ${MAX_ANALYSIS_DURATION_SEC}s limit. Speeding up ${speedFactor}x for analysis.`);
+  }
+
+  // Build video filter chain
+  const vfParts = ["scale=-2:480"];
+  if (speedFactor > 1.0) {
+    vfParts.push(`setpts=${(1 / speedFactor).toFixed(4)}*PTS`);
+  }
+  const vf = vfParts.join(",");
+
+  console.log(`[ffmpeg] Compressing for analysis: ${inputPath} → ${outputPath} (speed=${speedFactor}x)`);
   const startTime = Date.now();
 
-  return withFfmpegTimeout(
+  const result = await withFfmpegTimeout(
     (onCommand) =>
-      new Promise((resolve, reject) => {
+      new Promise<string>((resolve, reject) => {
         const cmd = ffmpeg(inputPath)
           .outputOptions([
-            "-vf", "scale=-2:480",      // 480p height, width auto-even
+            "-vf", vf,
             "-c:v", "libx264",
-            "-preset", "ultrafast",      // Speed over compression efficiency
-            "-crf", "32",                // Lower quality is fine for analysis
-            "-c:a", "aac",
-            "-b:a", "64k",              // Low audio bitrate
+            "-preset", "ultrafast",
+            "-crf", "32",
+            "-an",                         // Strip audio — not needed for exercise analysis
             "-movflags", "+faststart",
           ])
           .output(outputPath)
@@ -191,6 +223,8 @@ export async function compressForAnalysis(inputPath: string): Promise<string> {
     COMPRESS_TIMEOUT,
     "Video compression"
   );
+
+  return { outputPath: result, speedFactor };
 }
 
 export async function getVideoDuration(videoPath: string): Promise<number> {
