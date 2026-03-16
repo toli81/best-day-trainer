@@ -33,8 +33,8 @@ export function withTimeout<T>(
 const UPLOAD_TIMEOUT = 10 * 60 * 1000;   // 10 minutes for video upload
 const POLL_TIMEOUT = 15 * 60 * 1000;     // 15 minutes for processing poll
 const CACHE_TIMEOUT = 5 * 60 * 1000;     // 5 minutes for cache creation
-const OVERVIEW_TIMEOUT = 5 * 60 * 1000;  // 5 minutes for overview analysis
-const DETAIL_TIMEOUT = 3 * 60 * 1000;    // 3 minutes per detail batch
+const OVERVIEW_TIMEOUT = 10 * 60 * 1000; // 10 minutes for overview analysis (large video + no cache)
+const DETAIL_TIMEOUT = 10 * 60 * 1000;   // 10 minutes per detail batch (large video + no cache)
 
 export { OVERVIEW_TIMEOUT, DETAIL_TIMEOUT };
 
