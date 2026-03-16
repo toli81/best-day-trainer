@@ -157,7 +157,9 @@ export async function generateThumbnail(
  * We target 3,800 seconds (~63 min) to leave headroom for the prompt.
  * If the video is longer, we speed it up proportionally.
  */
-const MAX_ANALYSIS_DURATION_SEC = 3000; // ~50 min, leaves plenty of headroom for prompt tokens
+const MAX_ANALYSIS_DURATION_SEC = 2400; // ~40 min target — gives plenty of headroom under 1M token limit
+const MAX_TOKENS_ESTIMATE_PER_SEC = 263; // ~258 video + ~5 overhead per second (audio stripped)
+const MAX_GEMINI_TOKENS = 1_048_576;
 
 export interface CompressionResult {
   outputPath: string;
@@ -223,6 +225,21 @@ export async function compressForAnalysis(inputPath: string): Promise<Compressio
     COMPRESS_TIMEOUT,
     "Video compression"
   );
+
+  // Verify the output video duration is under the token limit
+  try {
+    const outputDuration = await getVideoDuration(result);
+    const estimatedTokens = Math.round(outputDuration * MAX_TOKENS_ESTIMATE_PER_SEC);
+    console.log(
+      `[ffmpeg] Post-compression check: ${Math.round(outputDuration)}s duration, ` +
+      `~${(estimatedTokens / 1000).toFixed(0)}K estimated tokens (limit: ${(MAX_GEMINI_TOKENS / 1000).toFixed(0)}K)`
+    );
+    if (estimatedTokens > MAX_GEMINI_TOKENS * 0.9) {
+      console.warn(`[ffmpeg] WARNING: Compressed video may still exceed token limit!`);
+    }
+  } catch (err) {
+    console.warn(`[ffmpeg] Could not verify output duration:`, err);
+  }
 
   return { outputPath: result, speedFactor };
 }

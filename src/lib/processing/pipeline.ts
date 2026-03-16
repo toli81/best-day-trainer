@@ -121,20 +121,19 @@ export async function processSession(sessionId: string) {
     let speedFactor = 1.0;
     if (!stageReached(stage, "compressed")) {
       console.log(`[${sessionId}] Stage 2: Compressing video for analysis...`);
-      try {
-        const result = await compressForAnalysis(videoPath);
-        analysisVideoPath = result.outputPath;
-        speedFactor = result.speedFactor;
-      } catch (err) {
-        console.warn(`[${sessionId}] Compression failed, using original:`, err);
-        analysisVideoPath = videoPath;
-      }
+      const result = await compressForAnalysis(videoPath);
+      analysisVideoPath = result.outputPath;
+      speedFactor = result.speedFactor;
+      console.log(`[${sessionId}] Compression complete: speedFactor=${speedFactor}, output=${analysisVideoPath}`);
       await updateSessionStatus(sessionId, "analyzing", {
         pipelineStage: "compressed",
       });
     } else {
-      // Resuming past compression: use original if compressed not available
-      analysisVideoPath = videoPath;
+      // Resuming past compression — re-compress since temp files don't survive restarts
+      console.log(`[${sessionId}] Stage 2: Re-compressing (temp files don't persist)...`);
+      const result = await compressForAnalysis(videoPath);
+      analysisVideoPath = result.outputPath;
+      speedFactor = result.speedFactor;
     }
 
     // ─── Stage 3: Upload to Gemini + create cache ───
