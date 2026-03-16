@@ -168,9 +168,9 @@ export interface CompressionResult {
 
 export async function compressForAnalysis(inputPath: string): Promise<CompressionResult> {
   const dir = path.dirname(inputPath);
-  const ext = path.extname(inputPath);
-  const base = path.basename(inputPath, ext);
-  const outputPath = path.join(dir, `${base}-analysis${ext}`);
+  const base = path.basename(inputPath, path.extname(inputPath));
+  // Always output as .mp4 — input may be .webm which can't hold H.264
+  const outputPath = path.join(dir, `${base}-analysis.mp4`);
 
   // Get duration to determine if we need to speed up
   const duration = await getVideoDuration(inputPath);
