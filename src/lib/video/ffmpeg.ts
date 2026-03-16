@@ -206,8 +206,17 @@ export async function compressForAnalysis(inputPath: string): Promise<Compressio
           .output(outputPath)
           .on("end", () => {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            const inputSize = fs.statSync(inputPath).size;
+            // Validate output file actually exists and has content
+            if (!fs.existsSync(outputPath)) {
+              reject(new Error(`[ffmpeg] Compression appeared to succeed but output file missing: ${outputPath}`));
+              return;
+            }
             const outputSize = fs.statSync(outputPath).size;
+            if (outputSize === 0) {
+              reject(new Error(`[ffmpeg] Compression produced empty file: ${outputPath}`));
+              return;
+            }
+            const inputSize = fs.statSync(inputPath).size;
             const ratio = ((1 - outputSize / inputSize) * 100).toFixed(0);
             console.log(
               `[ffmpeg] Compression complete in ${elapsed}s: ` +

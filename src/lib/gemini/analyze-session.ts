@@ -83,7 +83,17 @@ export async function analyzeSessionOverview(
     );
 
     const text = response.text ?? "";
-    const parsed = JSON.parse(text);
+    if (!text.trim()) {
+      throw new Error(`Gemini returned empty response for overview analysis`);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (parseErr) {
+      // Log first 500 chars of response to diagnose what Gemini returned
+      console.error(`[Gemini] Failed to parse overview JSON. Response (first 500 chars): ${text.slice(0, 500)}`);
+      throw new Error(`Gemini returned invalid JSON for overview: ${(parseErr as Error).message}. Response starts with: "${text.slice(0, 100)}"`);
+    }
     return ExerciseOverviewSchema.parse(parsed);
   }, "overview");
 }
@@ -116,7 +126,16 @@ export async function analyzeExerciseBatch(
     );
 
     const text = response.text ?? "";
-    const parsed = JSON.parse(text);
+    if (!text.trim()) {
+      throw new Error(`Gemini returned empty response for detail batch: ${exercises.map(e => e.label).join(", ")}`);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (parseErr) {
+      console.error(`[Gemini] Failed to parse detail JSON. Response (first 500 chars): ${text.slice(0, 500)}`);
+      throw new Error(`Gemini returned invalid JSON for details: ${(parseErr as Error).message}. Response starts with: "${text.slice(0, 100)}"`);
+    }
     const result = AllExerciseDetailsSchema.parse(parsed);
 
     // Sort by exerciseIndex and strip the index field

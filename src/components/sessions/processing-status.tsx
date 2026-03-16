@@ -14,6 +14,28 @@ const statusMessages: Record<string, string> = {
   error: "Processing failed",
 };
 
+const stageMessages: Record<string, string> = {
+  downloaded: "Video downloaded",
+  compressed: "Video compressed",
+  uploaded_to_gemini: "Uploaded to AI",
+  overview_complete: "Exercise list identified",
+  details_complete: "Exercise details analyzed",
+  clips_extracted: "Clips extracted",
+  notes_generated: "Notes written",
+  complete: "Done!",
+};
+
+const stageProgress: Record<string, number> = {
+  downloaded: 10,
+  compressed: 20,
+  uploaded_to_gemini: 35,
+  overview_complete: 50,
+  details_complete: 65,
+  clips_extracted: 80,
+  notes_generated: 90,
+  complete: 100,
+};
+
 const statusProgress: Record<string, number> = {
   uploaded: 0,
   analyzing: 30,
@@ -35,6 +57,7 @@ export function ProcessingStatus({
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
   const [error, setError] = useState<string | null>(null);
+  const [pipelineStage, setPipelineStage] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "complete" || status === "error") return;
@@ -44,6 +67,7 @@ export function ProcessingStatus({
         const res = await fetch(`/api/sessions/${sessionId}/status`);
         const data = await res.json();
         setStatus(data.status);
+        if (data.pipelineStage) setPipelineStage(data.pipelineStage);
         if (data.processingError) setError(data.processingError);
         if (data.status === "complete") {
           clearInterval(interval);
@@ -74,10 +98,24 @@ export function ProcessingStatus({
               {statusMessages[status] || status}
             </span>
             <span className="text-sm text-muted-foreground">
-              {statusProgress[status] || 0}%
+              {pipelineStage && stageProgress[pipelineStage]
+                ? `${stageProgress[pipelineStage]}%`
+                : `${statusProgress[status] || 0}%`}
             </span>
           </div>
-          <Progress value={statusProgress[status] || 0} className="[&>div]:bg-[#00CCFF]" />
+          <Progress
+            value={
+              pipelineStage && stageProgress[pipelineStage]
+                ? stageProgress[pipelineStage]
+                : statusProgress[status] || 0
+            }
+            className="[&>div]:bg-[#00CCFF]"
+          />
+          {pipelineStage && status !== "complete" && status !== "error" && stageMessages[pipelineStage] && (
+            <p className="text-xs text-muted-foreground">
+              Last completed: {stageMessages[pipelineStage]}
+            </p>
+          )}
 
           {status === "uploaded" && (
             <button

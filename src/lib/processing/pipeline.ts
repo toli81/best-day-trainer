@@ -92,6 +92,13 @@ export async function processSession(sessionId: string) {
   };
 
   try {
+    // Log disk space for diagnostics
+    try {
+      const { execSync } = await import("child_process");
+      const df = execSync("df -h /tmp 2>/dev/null || echo 'df not available'", { encoding: "utf-8" }).trim();
+      console.log(`[${sessionId}] Disk space:\n${df}`);
+    } catch { /* ignore */ }
+
     // Update status
     await updateSessionStatus(sessionId, "analyzing", {
       processingStartedAt: session.processingStartedAt || new Date().toISOString(),
@@ -357,9 +364,15 @@ export async function processSession(sessionId: string) {
 
     return { success: true };
   } catch (error) {
-    console.error(`Pipeline failed for session ${sessionId}:`, error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : undefined;
+    console.error(`Pipeline failed for session ${sessionId} at stage "${stage}":`, errMsg);
+    if (errStack) console.error(errStack);
+
+    // Store detailed error with stage info so the UI can show what went wrong
+    const latestStage = (await getSession(sessionId))?.pipelineStage || stage || "init";
     await updateSessionStatus(sessionId, "error", {
-      processingError: String(error),
+      processingError: `[Stage: ${latestStage}] ${errMsg}`,
       // pipelineStage is preserved from last checkpoint — enables resume on retry
     });
 
