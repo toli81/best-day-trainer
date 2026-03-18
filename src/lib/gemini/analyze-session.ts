@@ -8,6 +8,7 @@ import {
   OVERVIEW_TIMEOUT,
   CLIP_DETAIL_TIMEOUT,
 } from "./client";
+import { MediaResolution, ThinkingLevel } from "@google/genai";
 import { OVERVIEW_PROMPT, exerciseDetailPrompt } from "./prompts";
 import {
   ExerciseOverviewSchema,
@@ -36,8 +37,8 @@ function buildOverviewConfig(ref: VideoRef) {
   return {
     config: {
       responseMimeType: "application/json" as const,
-      mediaResolution: "low" as const,
-      thinkingConfig: { thinkingLevel: "low" as const },
+      mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
     },
     videoParts: [
       { fileData: { fileUri: ref.fileUri, mimeType: ref.mimeType || "video/mp4" } },
@@ -53,8 +54,8 @@ function buildClipDetailConfig(ref: VideoRef) {
   return {
     config: {
       responseMimeType: "application/json" as const,
-      mediaResolution: "medium" as const,
-      thinkingConfig: { thinkingLevel: "low" as const },
+      mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
     },
     videoParts: [
       { fileData: { fileUri: ref.fileUri, mimeType: ref.mimeType || "video/mp4" } },
