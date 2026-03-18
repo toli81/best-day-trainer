@@ -132,4 +132,13 @@ export async function updateExercise(
     .get();
 }
 
+export async function deleteSession(id: string) {
+  // Exercises cascade-delete via FK constraint
+  return db.delete(sessions).where(eq(sessions.id, id)).returning().get();
+}
+
+export async function deleteExercise(id: string) {
+  return db.delete(exercises).where(eq(exercises.id, id)).returning().get();
+}
+
 type Exercise = typeof exercises.$inferSelect;
