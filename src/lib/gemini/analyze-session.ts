@@ -63,6 +63,19 @@ function buildClipDetailConfig(ref: VideoRef) {
   };
 }
 
+/**
+ * Normalize an exercise item from Gemini's response to match our expected schema.
+ * Gemini 3 Flash may use snake_case, different field names, or nested structures.
+ */
+function normalizeOverviewExercise(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    startTimestamp: raw.startTimestamp ?? raw.start_timestamp ?? raw.startTime ?? raw.start_time ?? raw.start ?? "",
+    endTimestamp: raw.endTimestamp ?? raw.end_timestamp ?? raw.endTime ?? raw.end_time ?? raw.end ?? "",
+    label: raw.label ?? raw.name ?? raw.exercise_name ?? raw.exerciseName ?? raw.title ?? "",
+    isRestPeriod: raw.isRestPeriod ?? raw.is_rest_period ?? raw.isRest ?? raw.is_rest ?? raw.rest ?? false,
+  };
+}
+
 export async function analyzeSessionOverview(
   videoRef: VideoRef,
   callbacks?: AnalysisCallbacks
@@ -87,20 +100,28 @@ export async function analyzeSessionOverview(
     );
 
     const text = response.text ?? "";
+    console.log(`[Gemini] Raw overview response (first 500 chars): ${text.substring(0, 500)}`);
     let parsed = JSON.parse(text);
 
-    // Gemini 3 Flash sometimes returns a raw array instead of the expected object wrapper
+    // Handle raw array response
     if (Array.isArray(parsed)) {
       console.log(`[Gemini] Overview returned array (${parsed.length} items), wrapping in object`);
-      const realExercises = parsed.filter((e: { isRestPeriod?: boolean }) => !e.isRestPeriod);
-      parsed = {
-        exercises: parsed,
-        totalExerciseCount: realExercises.length,
-        sessionSummary: "Training session analysis",
-      };
+      parsed = { exercises: parsed };
     }
 
-    return ExerciseOverviewSchema.parse(parsed);
+    // Normalize the exercises array — handle different field naming conventions
+    const rawExercises = parsed.exercises ?? parsed.exercise_list ?? parsed.items ?? [];
+    const normalizedExercises = rawExercises.map((e: Record<string, unknown>) => normalizeOverviewExercise(e));
+
+    const realExercises = normalizedExercises.filter((e: Record<string, unknown>) => !e.isRestPeriod);
+    const result = {
+      exercises: normalizedExercises,
+      totalExerciseCount: parsed.totalExerciseCount ?? parsed.total_exercise_count ?? parsed.exerciseCount ?? realExercises.length,
+      sessionSummary: parsed.sessionSummary ?? parsed.session_summary ?? parsed.summary ?? "Training session analysis",
+    };
+
+    console.log(`[Gemini] Normalized overview: ${result.exercises.length} exercises, ${result.totalExerciseCount} non-rest`);
+    return ExerciseOverviewSchema.parse(result);
   }, "overview");
 }
 
@@ -134,6 +155,7 @@ export async function analyzeExerciseClip(
     );
 
     const text = response.text ?? "";
+    console.log(`[Gemini] Raw detail response for "${label}" (first 500 chars): ${text.substring(0, 500)}`);
     let parsed = JSON.parse(text);
 
     // Handle if Gemini wraps the result in an array or {exercises: [...]} wrapper
@@ -143,7 +165,21 @@ export async function analyzeExerciseClip(
       parsed = parsed.exercises[0];
     }
 
-    return ExerciseDetailSchema.parse(parsed);
+    // Normalize field names (handle snake_case variants)
+    const normalized = {
+      name: parsed.name ?? parsed.exercise_name ?? label,
+      description: parsed.description ?? parsed.exercise_description ?? "",
+      muscleGroups: parsed.muscleGroups ?? parsed.muscle_groups ?? [],
+      equipment: parsed.equipment ?? [],
+      difficulty: parsed.difficulty ?? "intermediate",
+      category: parsed.category ?? "strength",
+      repCount: parsed.repCount ?? parsed.rep_count ?? parsed.reps ?? null,
+      setCount: parsed.setCount ?? parsed.set_count ?? parsed.sets ?? null,
+      formNotes: parsed.formNotes ?? parsed.form_notes ?? "",
+      coachingCues: parsed.coachingCues ?? parsed.coaching_cues ?? [],
+    };
+
+    return ExerciseDetailSchema.parse(normalized);
   }, `clip-detail-${label}`);
 }
 
