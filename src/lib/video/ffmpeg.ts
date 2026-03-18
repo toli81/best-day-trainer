@@ -4,7 +4,6 @@ import path from "path";
 import fs from "fs";
 
 // Timeout constants
-const COMPRESS_TIMEOUT = 10 * 60 * 1000;  // 10 minutes for compression
 const CLIP_TIMEOUT = 3 * 60 * 1000;       // 3 minutes per clip
 const THUMBNAIL_TIMEOUT = 30 * 1000;       // 30 seconds per thumbnail
 
@@ -145,103 +144,6 @@ export async function generateThumbnail(
     THUMBNAIL_TIMEOUT,
     `Thumbnail at ${timestampSeconds}s`
   );
-}
-
-/**
- * Gemini token budget:
- * - Video: ~258 tokens per second (1 fps sampling)
- * - Audio: ~32 tokens per second
- * - Max context: 1,048,576 tokens
- *
- * With audio stripped, we can fit ~4,064 seconds (~67 min).
- * We target 3,800 seconds (~63 min) to leave headroom for the prompt.
- * If the video is longer, we speed it up proportionally.
- */
-const MAX_ANALYSIS_DURATION_SEC = 2400; // ~40 min target — gives plenty of headroom under 1M token limit
-const MAX_TOKENS_ESTIMATE_PER_SEC = 263; // ~258 video + ~5 overhead per second (audio stripped)
-const MAX_GEMINI_TOKENS = 1_048_576;
-
-export interface CompressionResult {
-  outputPath: string;
-  speedFactor: number; // 1.0 = normal speed, 1.5 = 50% faster, etc.
-}
-
-export async function compressForAnalysis(inputPath: string): Promise<CompressionResult> {
-  const dir = path.dirname(inputPath);
-  const base = path.basename(inputPath, path.extname(inputPath));
-  // Always output as .mp4 — input may be .webm which can't hold H.264
-  const outputPath = path.join(dir, `${base}-analysis.mp4`);
-
-  // Get duration to determine if we need to speed up
-  const duration = await getVideoDuration(inputPath);
-  let speedFactor = 1.0;
-  if (duration > MAX_ANALYSIS_DURATION_SEC) {
-    speedFactor = Math.ceil((duration / MAX_ANALYSIS_DURATION_SEC) * 10) / 10; // round up to 1 decimal
-    console.log(`[ffmpeg] Video is ${Math.round(duration)}s (${(duration/60).toFixed(1)}min), ` +
-      `exceeds ${MAX_ANALYSIS_DURATION_SEC}s limit. Speeding up ${speedFactor}x for analysis.`);
-  }
-
-  // Build video filter chain
-  const vfParts = ["scale=-2:480"];
-  if (speedFactor > 1.0) {
-    vfParts.push(`setpts=${(1 / speedFactor).toFixed(4)}*PTS`);
-  }
-  const vf = vfParts.join(",");
-
-  console.log(`[ffmpeg] Compressing for analysis: ${inputPath} → ${outputPath} (speed=${speedFactor}x)`);
-  const startTime = Date.now();
-
-  const result = await withFfmpegTimeout(
-    (onCommand) =>
-      new Promise<string>((resolve, reject) => {
-        const cmd = ffmpeg(inputPath)
-          .outputOptions([
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "32",
-            "-an",                         // Strip audio — not needed for exercise analysis
-            "-movflags", "+faststart",
-          ])
-          .output(outputPath)
-          .on("end", () => {
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            const inputSize = fs.statSync(inputPath).size;
-            const outputSize = fs.statSync(outputPath).size;
-            const ratio = ((1 - outputSize / inputSize) * 100).toFixed(0);
-            console.log(
-              `[ffmpeg] Compression complete in ${elapsed}s: ` +
-              `${(inputSize / 1024 / 1024).toFixed(0)}MB → ${(outputSize / 1024 / 1024).toFixed(0)}MB (${ratio}% reduction)`
-            );
-            resolve(outputPath);
-          })
-          .on("error", (err) => {
-            console.error(`[ffmpeg] Compression failed: ${err.message}`);
-            reject(err);
-          });
-        onCommand(cmd);
-        cmd.run();
-      }),
-    COMPRESS_TIMEOUT,
-    "Video compression"
-  );
-
-  // Verify the output video duration is under the token limit
-  try {
-    const outputDuration = await getVideoDuration(result);
-    const estimatedTokens = Math.round(outputDuration * MAX_TOKENS_ESTIMATE_PER_SEC);
-    console.log(
-      `[ffmpeg] Post-compression check: ${Math.round(outputDuration)}s duration, ` +
-      `~${(estimatedTokens / 1000).toFixed(0)}K estimated tokens (limit: ${(MAX_GEMINI_TOKENS / 1000).toFixed(0)}K)`
-    );
-    if (estimatedTokens > MAX_GEMINI_TOKENS * 0.9) {
-      console.warn(`[ffmpeg] WARNING: Compressed video may still exceed token limit!`);
-    }
-  } catch (err) {
-    console.warn(`[ffmpeg] Could not verify output duration:`, err);
-  }
-
-  return { outputPath: result, speedFactor };
 }
 
 export async function getVideoDuration(videoPath: string): Promise<number> {
