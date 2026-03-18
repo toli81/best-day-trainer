@@ -87,7 +87,19 @@ export async function analyzeSessionOverview(
     );
 
     const text = response.text ?? "";
-    const parsed = JSON.parse(text);
+    let parsed = JSON.parse(text);
+
+    // Gemini 3 Flash sometimes returns a raw array instead of the expected object wrapper
+    if (Array.isArray(parsed)) {
+      console.log(`[Gemini] Overview returned array (${parsed.length} items), wrapping in object`);
+      const realExercises = parsed.filter((e: { isRestPeriod?: boolean }) => !e.isRestPeriod);
+      parsed = {
+        exercises: parsed,
+        totalExerciseCount: realExercises.length,
+        sessionSummary: "Training session analysis",
+      };
+    }
+
     return ExerciseOverviewSchema.parse(parsed);
   }, "overview");
 }
@@ -122,7 +134,15 @@ export async function analyzeExerciseClip(
     );
 
     const text = response.text ?? "";
-    const parsed = JSON.parse(text);
+    let parsed = JSON.parse(text);
+
+    // Handle if Gemini wraps the result in an array or {exercises: [...]} wrapper
+    if (Array.isArray(parsed)) {
+      parsed = parsed[0];
+    } else if (parsed.exercises && Array.isArray(parsed.exercises)) {
+      parsed = parsed.exercises[0];
+    }
+
     return ExerciseDetailSchema.parse(parsed);
   }, `clip-detail-${label}`);
 }
