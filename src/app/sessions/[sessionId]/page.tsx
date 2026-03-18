@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { ProcessingStatus } from "@/components/sessions/processing-status";
 import { ExerciseGrid } from "@/components/exercises/exercise-grid";
 import { formatDuration } from "@/lib/utils/timestamps";
+import { DeleteSessionButton } from "@/components/sessions/delete-session-button";
 
 export const dynamic = "force-dynamic";
 
@@ -38,18 +39,21 @@ export default async function SessionPage({
             )}
           </div>
         </div>
-        <Badge
-          variant="secondary"
-          className={
-            isComplete
-              ? "bg-[#07B492] text-white"
-              : session.status === "error"
-                ? "bg-red-500 text-white"
-                : "bg-[#000075] text-white"
-          }
-        >
-          {session.status}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <DeleteSessionButton sessionId={sessionId} />
+          <Badge
+            variant="secondary"
+            className={
+              isComplete
+                ? "bg-[#07B492] text-white"
+                : session.status === "error"
+                  ? "bg-red-500 text-white"
+                  : "bg-[#000075] text-white"
+            }
+          >
+            {session.status}
+          </Badge>
+        </div>
       </div>
 
       {/* Processing Status */}
