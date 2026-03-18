@@ -8,7 +8,7 @@ if (!process.env.GEMINI_API_KEY) {
 export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export const GEMINI_MODEL = "gemini-2.5-pro";
-export const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+export const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
 
 /**
  * Race a promise against a timeout. Rejects with a clear error if the timeout fires first.
@@ -34,9 +34,10 @@ const UPLOAD_TIMEOUT = 10 * 60 * 1000;   // 10 minutes for video upload
 const POLL_TIMEOUT = 15 * 60 * 1000;     // 15 minutes for processing poll
 const CACHE_TIMEOUT = 5 * 60 * 1000;     // 5 minutes for cache creation
 const OVERVIEW_TIMEOUT = 10 * 60 * 1000; // 10 minutes for overview analysis (large video + no cache)
-const DETAIL_TIMEOUT = 10 * 60 * 1000;   // 10 minutes per detail batch (large video + no cache)
+const DETAIL_TIMEOUT = 10 * 60 * 1000;   // 10 minutes — kept for backward compat reference
+const CLIP_DETAIL_TIMEOUT = 3 * 60 * 1000; // 3 minutes per individual clip analysis
 
-export { OVERVIEW_TIMEOUT, DETAIL_TIMEOUT };
+export { OVERVIEW_TIMEOUT, DETAIL_TIMEOUT, CLIP_DETAIL_TIMEOUT };
 
 export async function uploadVideoToGemini(filePath: string, mimeType = "video/mp4") {
   const fileSize = fs.statSync(filePath).size;
