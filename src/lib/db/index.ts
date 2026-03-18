@@ -78,6 +78,48 @@ function initDb() {
     );
   `);
 
+  // New tables for client portal
+  _sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      phone TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      role TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      last_active_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      action TEXT NOT NULL,
+      resource_type TEXT,
+      resource_id TEXT,
+      ip_address TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Migrations: add new columns safely (SQLite ALTER TABLE ADD COLUMN is safe)
   const migrations = [
     "ALTER TABLE sessions ADD COLUMN gemini_file_name TEXT",
@@ -93,13 +135,18 @@ function initDb() {
     }
   }
 
+  // Add new columns to existing tables
+  try { _sqlite.exec("ALTER TABLE sessions ADD COLUMN client_id TEXT"); } catch {}
+  try { _sqlite.exec("ALTER TABLE exercises ADD COLUMN form_score INTEGER"); } catch {}
+  try { _sqlite.exec("ALTER TABLE exercises ADD COLUMN form_score_override INTEGER"); } catch {}
+
   // Recover sessions stuck in processing states (e.g., from server restart)
   _sqlite.exec(`
     UPDATE sessions
     SET status = 'error',
         processing_error = 'Processing interrupted by server restart — click Retry to resume',
         updated_at = datetime('now')
-    WHERE status IN ('analyzing', 'segmenting', 'generating_notes')
+    WHERE status IN ('analyzing', 'segmenting', 'generating_notes', 'form_scores_generated')
   `);
 
   _sqlite.exec(`
