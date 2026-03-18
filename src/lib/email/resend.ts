@@ -1,16 +1,27 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let _resend: Resend | null = null;
 
-// Update this to your verified Resend domain, or use an env var
-const FROM_EMAIL = process.env.FROM_EMAIL || "Best Day Trainer <noreply@yourdomain.com>";
+function getResend(): Resend {
+  if (!_resend) {
+    if (!process.env.RESEND_API_KEY) {
+      throw new Error("RESEND_API_KEY is not set");
+    }
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
+}
+
+function getFromEmail(): string {
+  return process.env.FROM_EMAIL || "Best Day Trainer <noreply@yourdomain.com>";
+}
 
 export async function sendMagicLinkEmail(email: string, token: string) {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const verifyUrl = `${baseUrl}/auth/verify?token=${token}`;
 
-  await resend.emails.send({
-    from: FROM_EMAIL,
+  await getResend().emails.send({
+    from: getFromEmail(),
     to: email,
     subject: "Your Best Day Trainer login link",
     html: `
@@ -26,8 +37,8 @@ export async function sendWelcomeEmail(email: string, name: string, token: strin
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const verifyUrl = `${baseUrl}/auth/verify?token=${token}`;
 
-  await resend.emails.send({
-    from: FROM_EMAIL,
+  await getResend().emails.send({
+    from: getFromEmail(),
     to: email,
     subject: `Welcome to Best Day Trainer, ${name}!`,
     html: `
@@ -43,8 +54,8 @@ export async function sendReminderEmail(email: string, name: string, token: stri
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const verifyUrl = `${baseUrl}/auth/verify?token=${token}`;
 
-  await resend.emails.send({
-    from: FROM_EMAIL,
+  await getResend().emails.send({
+    from: getFromEmail(),
     to: email,
     subject: `${name}, check out your training progress!`,
     html: `
