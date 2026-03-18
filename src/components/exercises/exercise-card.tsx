@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDuration } from "@/lib/utils/timestamps";
@@ -21,12 +20,11 @@ export function ExerciseCard({ exercise, onClick }: ExerciseCardProps) {
     >
       {exercise.thumbnailFilePath && (
         <div className="relative aspect-video w-full bg-secondary">
-          <Image
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={exercise.thumbnailFilePath}
             alt={exercise.name}
-            fill
-            className="object-cover"
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            className="absolute inset-0 h-full w-full object-cover"
           />
           {exercise.clipDurationSeconds && (
             <span className="absolute bottom-2 right-2 rounded bg-[#111F32]/80 px-1.5 py-0.5 text-xs text-white">
