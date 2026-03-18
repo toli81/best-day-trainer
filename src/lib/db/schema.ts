@@ -83,6 +83,9 @@ export const exercises = sqliteTable("exercises", {
     .notNull()
     .default(true),
   tags: text("tags"),
+  detailStatus: text("detail_status", {
+    enum: ["pending", "complete", "failed"],
+  }).default("complete"),
 
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

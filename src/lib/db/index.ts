@@ -72,6 +72,7 @@ function initDb() {
       clip_duration_seconds REAL,
       is_library_entry INTEGER NOT NULL DEFAULT 1,
       tags TEXT,
+      detail_status TEXT DEFAULT 'complete',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -82,6 +83,7 @@ function initDb() {
     "ALTER TABLE sessions ADD COLUMN gemini_file_name TEXT",
     "ALTER TABLE sessions ADD COLUMN details_analysis TEXT",
     "ALTER TABLE sessions ADD COLUMN pipeline_stage TEXT",
+    "ALTER TABLE exercises ADD COLUMN detail_status TEXT DEFAULT 'complete'",
   ];
   for (const m of migrations) {
     try {
@@ -98,6 +100,15 @@ function initDb() {
         processing_error = 'Processing interrupted by server restart — click Retry to resume',
         updated_at = datetime('now')
     WHERE status IN ('analyzing', 'segmenting', 'generating_notes')
+  `);
+
+  _sqlite.exec(`
+    UPDATE sessions
+    SET pipeline_stage = 'downloaded',
+        status = 'error',
+        processing_error = 'Pipeline upgraded — old compression stage no longer exists. Click Retry to reprocess.',
+        updated_at = datetime('now')
+    WHERE pipeline_stage = 'compressed'
   `);
 
   _db = drizzle(_sqlite, { schema });
