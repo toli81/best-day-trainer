@@ -1,13 +1,47 @@
-/** Convert "MM:SS" or "H:MM:SS" to total seconds */
-export function parseTimestamp(ts: string): number {
+/** Convert various timestamp formats to total seconds.
+ * Handles: "MM:SS", "H:MM:SS", "HH:MM:SS", "2m30s", "150" (raw seconds), numbers
+ */
+export function parseTimestamp(ts: string | number): number {
+  // Handle numeric input (seconds as number)
+  if (typeof ts === "number") return ts;
+
+  // Trim whitespace
+  ts = ts.trim();
+
+  // Handle raw numeric string (seconds)
+  if (/^\d+(\.\d+)?$/.test(ts)) {
+    return parseFloat(ts);
+  }
+
+  // Handle "XmYs" or "Xm Ys" format
+  const minsSecMatch = ts.match(/^(\d+)\s*m\s*(\d+)\s*s?$/i);
+  if (minsSecMatch) {
+    return parseInt(minsSecMatch[1]) * 60 + parseInt(minsSecMatch[2]);
+  }
+
+  // Handle "Xm" format (minutes only)
+  const minsOnly = ts.match(/^(\d+)\s*m$/i);
+  if (minsOnly) {
+    return parseInt(minsOnly[1]) * 60;
+  }
+
+  // Handle "Xs" format (seconds only)
+  const secsOnly = ts.match(/^(\d+)\s*s$/i);
+  if (secsOnly) {
+    return parseInt(secsOnly[1]);
+  }
+
+  // Handle colon-separated: "MM:SS" or "H:MM:SS" or "HH:MM:SS"
   const parts = ts.split(":").map(Number);
-  if (parts.length === 2) {
+  if (parts.length === 2 && parts.every((p) => !isNaN(p))) {
     return parts[0] * 60 + parts[1];
   }
-  if (parts.length === 3) {
+  if (parts.length === 3 && parts.every((p) => !isNaN(p))) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
   }
-  throw new Error(`Invalid timestamp format: ${ts}`);
+
+  console.warn(`[Timestamp] Could not parse: "${ts}", defaulting to 0`);
+  return 0;
 }
 
 /** Convert seconds to "MM:SS" */
