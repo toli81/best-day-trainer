@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getExercise, updateExercise } from "@/lib/db/queries";
+import { getExercise, updateExercise, deleteExercise } from "@/lib/db/queries";
+import { deleteObject } from "@/lib/r2/client";
 
 export async function GET(
   req: NextRequest,
@@ -28,4 +29,29 @@ export async function PATCH(
   }
 
   return NextResponse.json(updated);
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ exerciseId: string }> }
+) {
+  const { exerciseId } = await params;
+  const exercise = await getExercise(exerciseId);
+
+  if (!exercise) {
+    return NextResponse.json({ error: "Exercise not found" }, { status: 404 });
+  }
+
+  // Clean up R2 resources
+  if (exercise.clipFilePath) {
+    const clipKey = exercise.clipFilePath.replace(/^\//, "");
+    await deleteObject(clipKey);
+  }
+  if (exercise.thumbnailFilePath) {
+    const thumbKey = exercise.thumbnailFilePath.replace(/^\//, "");
+    await deleteObject(thumbKey);
+  }
+
+  await deleteExercise(exerciseId);
+  return NextResponse.json({ success: true });
 }
