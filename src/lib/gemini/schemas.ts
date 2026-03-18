@@ -37,13 +37,3 @@ export const ExerciseDetailSchema = z.object({
 });
 
 export type ExerciseDetail = z.infer<typeof ExerciseDetailSchema>;
-
-export const AllExerciseDetailsSchema = z.object({
-  exercises: z.array(
-    ExerciseDetailSchema.extend({
-      exerciseIndex: z.number(),
-    })
-  ),
-});
-
-export type AllExerciseDetails = z.infer<typeof AllExerciseDetailsSchema>;

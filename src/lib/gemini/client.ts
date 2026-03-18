@@ -32,7 +32,6 @@ export function withTimeout<T>(
 // Timeout constants (milliseconds)
 const UPLOAD_TIMEOUT = 10 * 60 * 1000;   // 10 minutes for video upload
 const POLL_TIMEOUT = 15 * 60 * 1000;     // 15 minutes for processing poll
-const CACHE_TIMEOUT = 5 * 60 * 1000;     // 5 minutes for cache creation
 const OVERVIEW_TIMEOUT = 10 * 60 * 1000; // 10 minutes for overview analysis (large video + no cache)
 const DETAIL_TIMEOUT = 10 * 60 * 1000;   // 10 minutes — kept for backward compat reference
 const CLIP_DETAIL_TIMEOUT = 3 * 60 * 1000; // 3 minutes per individual clip analysis
@@ -108,59 +107,6 @@ export async function deleteGeminiFile(name: string) {
     await ai.files.delete({ name });
   } catch (e) {
     console.warn("Failed to delete Gemini file:", e);
-  }
-}
-
-/**
- * Create a context cache for a video file so all subsequent API calls
- * reference cached tokens instead of re-ingesting the full video each time.
- * This dramatically reduces token consumption and avoids 429 rate limits.
- *
- * Returns null if the model doesn't support caching (e.g. gemini-2.5-flash).
- */
-export async function createVideoCache(
-  fileUri: string,
-  mimeType: string,
-  model: string
-) {
-  console.log("[Gemini] Creating video cache...");
-  try {
-    const cache = await withTimeout(
-      ai.caches.create({
-        model,
-        config: {
-          contents: [
-            {
-              role: "user",
-              parts: [{ fileData: { fileUri, mimeType } }],
-            },
-          ],
-          ttl: "3600s", // 1 hour — plenty for processing
-          displayName: `bdt-session-${Date.now()}`,
-        },
-      }),
-      CACHE_TIMEOUT,
-      "Gemini cache creation"
-    );
-
-    console.log(`[Gemini] Video cache created: ${cache.name}`);
-    return cache;
-  } catch (err) {
-    const errStr = String(err);
-    if (errStr.includes("too large") || errStr.includes("max_total_token_count") || errStr.includes("INVALID_ARGUMENT")) {
-      console.warn(`[Gemini] Caching not supported for this model/video, will use direct file reference: ${errStr}`);
-      return null;
-    }
-    throw err; // Re-throw unexpected errors
-  }
-}
-
-export async function deleteVideoCache(cacheName: string) {
-  try {
-    await ai.caches.delete({ name: cacheName });
-    console.log(`[Gemini] Video cache deleted: ${cacheName}`);
-  } catch (e) {
-    console.warn("Failed to delete Gemini cache:", e);
   }
 }
 
