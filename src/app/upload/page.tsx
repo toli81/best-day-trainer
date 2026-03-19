@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useUpload } from "@/hooks/use-upload";
+import { ClientSelector } from "@/components/client-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [clientName, setClientName] = useState("");
+  const [clientId, setClientId] = useState<string | null>(null);
   const [sessionDate, setSessionDate] = useState(
     new Date().toISOString().split("T")[0]
   );
@@ -41,7 +42,7 @@ export default function UploadPage() {
   const handleSubmit = async () => {
     if (!selectedFile) return;
     try {
-      const sessionId = await upload(selectedFile, clientName, sessionDate);
+      const sessionId = await upload(selectedFile, clientId || undefined, sessionDate);
       router.push(`/sessions/${sessionId}`);
     } catch {
       // error is already set in the hook
@@ -123,13 +124,8 @@ export default function UploadPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="text-sm font-medium text-secondary-foreground">Client Name</label>
-            <Input
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-              placeholder="e.g., John Smith"
-              className="rounded-[10px] border-border focus-visible:ring-[#00CCFF]"
-            />
+            <label className="text-sm font-medium text-secondary-foreground">Client</label>
+            <ClientSelector value={clientId} onChange={setClientId} />
           </div>
           <div>
             <label className="text-sm font-medium text-secondary-foreground">Session Date</label>
