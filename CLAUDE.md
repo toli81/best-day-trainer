@@ -1,87 +1,115 @@
-# CLAUDE.md - Best Day Trainer
+# CLAUDE.md
 
-## Git Workflow (IMPORTANT - Follow Every Session)
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This project deploys automatically to Railway when changes are pushed to GitHub.
+## Commands
 
-**Before making ANY code changes:**
 ```bash
-git pull origin master
+npm run dev          # Start Next.js dev server (http://localhost:3000)
+npm run build        # Production build (use to verify before pushing)
+npm run lint         # ESLint
+npx tsc --noEmit     # Type check without building
 ```
 
-**After making changes:**
-```bash
-git add .
-git commit -m "Describe what was changed"
-git push origin master
-```
+No test framework is configured. Verify changes with `npx tsc --noEmit` and `npm run build`.
 
-This ensures changes from any device (desktop, laptop, or mobile) stay in sync and auto-deploy to Railway.
+## Git & Deployment
 
-- **Repo**: https://github.com/toli81/best-day-trainer
-- **Branch**: master
+- **Repo**: https://github.com/toli81/best-day-trainer — branch: `master`
 - **Deploy**: Railway auto-deploys on push to master
+- Always `git pull origin master` before making changes (edits come from multiple devices)
+- Railway build takes ~3-5 minutes
 
-## Project Structure Notes
+## Architecture Overview
 
-- Git root is `C:\Users\chris\Desktop\APP DEV\best-day-trainer\` — source files are at `src/` (NOT inside the untracked `best-day-trainer/` subdirectory which has stale code)
-- Next.js 16.1.6 app with App Router
-- Uses `better-sqlite3`, `fluent-ffmpeg`, `ffmpeg-static`
+Next.js 16 App Router + TypeScript + SQLite (Drizzle ORM) + Cloudflare R2 + Gemini + Claude.
 
-## Upload System (Direct-to-R2 Multipart Upload)
+The app lets a personal trainer record/upload training session videos on their phone, then AI analyzes them to identify exercises, extract clips, and generate coaching notes.
 
-The app records and uploads training session videos (typically **55 minutes long**, 400-800MB).
+### Path alias: `@/*` → `./src/*`
 
-### Architecture
-Videos upload **directly from the phone to Cloudflare R2** using S3-compatible presigned URLs. Zero video data flows through Railway.
+### Key domains in `src/lib/`:
 
-- **Client hook**: `src/hooks/use-upload.ts` — uploads 10MB parts directly to R2 presigned URLs
-- **R2 client**: `src/lib/r2/client.ts` — S3-compatible wrapper for Cloudflare R2
-- **Upload session store**: `src/lib/r2/upload-sessions.ts` — in-memory Map for upload metadata
-- **Server endpoints**:
-  - `POST /api/upload/init` — creates R2 multipart upload, returns presigned URLs for all parts
-  - `POST /api/upload/complete` — completes R2 multipart upload with ETags, creates DB session
-  - `POST /api/upload/cleanup` — aborts R2 multipart upload on failure
-- **Record page** (`src/app/record/page.tsx`) and **Upload page** (`src/app/upload/page.tsx`) both use the same `useUpload()` hook
+| Directory | Purpose |
+|-----------|---------|
+| `db/` | Drizzle schema, queries, SQLite connection (better-sqlite3) |
+| `r2/` | Cloudflare R2 client (S3-compatible), upload session tracking |
+| `gemini/` | Gemini 3.1 Pro video analysis (overview + clip detail) |
+| `claude/` | Claude session notes + exercise tagging |
+| `video/` | FFmpeg clip extraction and thumbnail generation |
+| `processing/` | Pipeline orchestration with checkpoint stages |
+| `auth/` | Magic link session management (currently bypassed) |
+| `email/` | Resend email client |
 
-### Upload Flow
+## Upload System
+
+Videos upload **directly from the phone to Cloudflare R2** via presigned URLs. Zero video data flows through Railway.
+
 1. Client → `POST /api/upload/init` → server creates R2 multipart upload, returns presigned PUT URLs
-2. Client → `PUT` each 10MB part directly to R2 (presigned URL, bypasses Railway)
-3. Client → `POST /api/upload/complete` with ETags → server finalizes R2 multipart upload
+2. Client uploads 10MB parts directly to R2 (5 retries, 120s timeout per part)
+3. Client → `POST /api/upload/complete` with ETags → server finalizes upload, creates DB session
 
-### Storage Layout (R2)
-- Full videos: `videos/{sessionId}.mp4`
-- Clips: `clips/{sessionId}/{exerciseId}.mp4`
-- Thumbnails: `clips/{sessionId}/{exerciseId}.jpg`
+Both `/record` and `/upload` pages use the `useUpload()` hook (`src/hooks/use-upload.ts`).
 
-### Key Settings
-- Part size: **10MB** (R2 multipart minimum is 5MB except last part)
-- Max retries: **5** with exponential backoff (2s, 4s, 6s, 8s, 10s)
-- Part timeout: **120 seconds** via AbortController
-- Presigned URLs expire in **1 hour**
-- MediaRecorder uses 30-second data intervals (`recorder.start(30000)`)
+**R2 storage layout:**
+```
+videos/{sessionId}.{ext}              # Full session videos
+clips/{sessionId}/{exerciseId}.mp4    # Exercise clips
+clips/{sessionId}/{exerciseId}.jpg    # Thumbnails
+```
 
-### Processing Pipeline
-After upload, `src/lib/processing/pipeline.ts`:
-1. Downloads video from R2 to `/tmp` for FFmpeg processing
-2. Runs Gemini analysis on local temp file
-3. Extracts clips/thumbnails with FFmpeg → uploads each to R2
-4. Cleans up all temp files
+## AI Analysis Pipeline (Clip-First)
 
-### Clips Serving
-- `src/app/clips/[...path]/route.ts` tries local file first (backward compat), then redirects to R2 presigned GET URL
-- Old sessions with local paths still work
+Orchestrated in `src/lib/processing/pipeline.ts`. Each stage is checkpointed to the `pipeline_stage` DB column — on retry, the pipeline resumes from the last completed stage.
 
-### Environment Variables (Railway)
-- `R2_ACCOUNT_ID` — Cloudflare account ID
-- `R2_ACCESS_KEY_ID` — R2 API token key ID
-- `R2_SECRET_ACCESS_KEY` — R2 API token secret
-- `R2_BUCKET_NAME` — defaults to `best-day-trainer`
+```
+Download from R2 → /tmp
+  ↓
+Gemini overview pass (low resolution, full video) → exercise timestamps
+  ↓
+FFmpeg clip extraction + thumbnail generation → upload to R2
+  ↓
+Gemini detail pass (medium resolution, per-clip) → form/technique analysis
+  ↓
+Claude session notes → professional documentation
+  ↓
+Claude tagging → standardized names + searchability tags
+```
 
-### R2 Bucket CORS
-Must expose `ETag` header and allow PUT from the app domain.
+**Concurrency**: Only one session processes at a time (Railway ~1GB ephemeral disk). The pipeline uses a global guard and returns 409 if another session is already processing.
 
-### Known Constraints
-- The entire recording blob sits in phone memory until upload completes — potential OOM risk for very long sessions
-- Processing temporarily downloads the full video to Railway `/tmp` (~800MB). Fits in Railway's ~1GB ephemeral disk since it's cleaned up immediately after.
-- Only one session should process at a time to avoid disk exhaustion
+**Gemini response parsing**: Gemini 3.1 Pro returns inconsistent JSON (arrays vs objects, snake_case vs camelCase, varied timestamp formats). `analyze-session.ts` normalizes all response shapes defensively.
+
+## Database
+
+SQLite via `better-sqlite3` with Drizzle ORM. Schema at `src/lib/db/schema.ts`.
+
+**Migrations**: Auto-applied on startup in `src/lib/db/index.ts` using safe `ALTER TABLE ADD COLUMN` wrapped in try-catch. No separate migration files needed.
+
+**Stuck session recovery**: On server startup, sessions stuck in "analyzing"/"segmenting"/"generating_notes" are auto-reset to "error" so users can retry.
+
+**Key tables**: `sessions` (with pipeline checkpoints), `exercises` (with `detailStatus` for per-exercise processing), `clients`, `auth_tokens`, `auth_sessions`, `audit_log`.
+
+**Client name resolution**: New sessions use `clientId` (FK to clients table). Old sessions have `clientName` (free text). Use `getClientName()` from `queries.ts` which checks `clientId` first, falls back to `clientName`.
+
+## Auth Status
+
+Auth is **currently bypassed**. `src/middleware.ts` returns `NextResponse.next()` for all requests. The original magic-link auth logic is commented out and preserved for re-enabling later. All auth infrastructure (tables, routes, email) is built but inactive.
+
+## Environment Variables
+
+**Required:**
+- `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+
+**Optional:**
+- `R2_BUCKET_NAME` (defaults to `best-day-trainer`)
+- `TRAINER_EMAIL` (for auth, when re-enabled)
+- `RESEND_API_KEY` (for magic link emails)
+
+## Constraints
+
+- Recording blob stays in phone memory until upload completes — OOM risk for very long sessions
+- Processing downloads full video to `/tmp` (~800MB) — fits Railway's ~1GB ephemeral disk since it's cleaned up after
+- Only one session processes at a time to avoid disk exhaustion
+- R2 bucket CORS must expose `ETag` header and allow PUT from the app domain
