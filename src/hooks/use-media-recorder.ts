@@ -122,9 +122,15 @@ export function useMediaRecorder() {
     return types.find((t) => MediaRecorder.isTypeSupported(t)) || "video/webm";
   }, []);
 
-  // Start preview stream
+  // Start preview stream (stops old tracks first)
   const startPreview = useCallback(async () => {
     try {
+      // Stop existing stream tracks before requesting a new one
+      setState((prev) => {
+        prev.stream?.getTracks().forEach((t) => t.stop());
+        return prev;
+      });
+
       const constraints: MediaStreamConstraints = {
         video: selectedCamera
           ? { deviceId: { exact: selectedCamera } }
@@ -144,6 +150,19 @@ export function useMediaRecorder() {
       return null;
     }
   }, [selectedCamera, selectedMic]);
+
+  // Auto-restart preview when camera or mic selection changes
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    // Skip the first render — startPreview is called explicitly on mount
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      return;
+    }
+    if (selectedCamera || selectedMic) {
+      startPreview();
+    }
+  }, [selectedCamera, selectedMic, startPreview]);
 
   // Start recording
   const startRecording = useCallback(async () => {
