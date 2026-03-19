@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     const dbSession = await createSession({
       id: sessionId,
       title: session.title || `Session ${new Date().toLocaleDateString()}`,
-      clientName: session.clientName || undefined,
+      clientId: session.clientId || undefined,
       recordedAt: now,
       videoFilePath: `r2://${session.r2Key}`,
       videoFileName: session.fileName,

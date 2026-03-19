@@ -122,12 +122,12 @@ export function useUpload() {
   });
   const abortRef = useRef(false);
   // Store last upload args for retry
-  const lastArgsRef = useRef<{ file: File; clientName?: string; sessionDate?: string } | null>(null);
+  const lastArgsRef = useRef<{ file: File; clientId?: string; sessionDate?: string } | null>(null);
 
   const upload = useCallback(
-    async (file: File, clientName?: string, sessionDate?: string) => {
+    async (file: File, clientId?: string, sessionDate?: string) => {
       abortRef.current = false;
-      lastArgsRef.current = { file, clientName, sessionDate };
+      lastArgsRef.current = { file, clientId, sessionDate };
       setState({
         progress: 0,
         uploading: true,
@@ -146,7 +146,7 @@ export function useUpload() {
           body: JSON.stringify({
             fileName: file.name,
             fileSize: file.size,
-            clientName: clientName || null,
+            clientId: clientId || null,
             title: sessionDate
               ? `Session ${new Date(sessionDate).toLocaleDateString()}`
               : null,
@@ -241,8 +241,8 @@ export function useUpload() {
 
   const retry = useCallback(async () => {
     if (!lastArgsRef.current) return;
-    const { file, clientName, sessionDate } = lastArgsRef.current;
-    return upload(file, clientName, sessionDate);
+    const { file, clientId, sessionDate } = lastArgsRef.current;
+    return upload(file, clientId, sessionDate);
   }, [upload]);
 
   const cancel = useCallback(() => {

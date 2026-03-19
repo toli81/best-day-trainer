@@ -5,7 +5,7 @@ export interface UploadSession {
   r2UploadId: string;
   fileName: string;
   fileSize: number;
-  clientName: string | null;
+  clientId: string | null;
   title: string | null;
   createdAt: number;
 }

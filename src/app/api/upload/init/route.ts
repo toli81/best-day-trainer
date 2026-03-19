@@ -8,7 +8,7 @@ const PART_SIZE = 10 * 1024 * 1024; // 10MB per part (R2 minimum is 5MB except l
 
 export async function POST(req: NextRequest) {
   try {
-    const { fileName, fileSize, clientName, title } = await req.json();
+    const { fileName, fileSize, clientId, title } = await req.json();
 
     if (!fileName || !fileSize) {
       return NextResponse.json(
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       r2UploadId,
       fileName,
       fileSize,
-      clientName: clientName || null,
+      clientId: clientId || null,
       title: title || null,
       createdAt: Date.now(),
     });
