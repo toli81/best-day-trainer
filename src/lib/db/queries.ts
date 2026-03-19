@@ -1,6 +1,6 @@
 import { db } from "./index";
-import { sessions, exercises, type NewSession, type NewExercise } from "./schema";
-import { eq, desc, like, and, sql } from "drizzle-orm";
+import { sessions, exercises, clients, type NewSession, type NewExercise, type NewClient } from "./schema";
+import { eq, desc, like, and, sql, asc } from "drizzle-orm";
 
 export async function createSession(data: NewSession) {
   return db.insert(sessions).values(data).returning().get();
@@ -146,3 +146,22 @@ export async function deleteExercisesBySession(sessionId: string) {
 }
 
 type Exercise = typeof exercises.$inferSelect;
+
+export async function listClients() {
+  return db
+    .select()
+    .from(clients)
+    .where(eq(clients.status, "active"))
+    .orderBy(asc(clients.name))
+    .all();
+}
+
+export async function getClient(id: string) {
+  return db.query.clients.findFirst({
+    where: eq(clients.id, id),
+  });
+}
+
+export async function createClient(data: NewClient) {
+  return db.insert(clients).values(data).returning().get();
+}
