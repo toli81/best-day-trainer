@@ -7,6 +7,7 @@ import { ProcessingStatus } from "@/components/sessions/processing-status";
 import { ExerciseGrid } from "@/components/exercises/exercise-grid";
 import { formatDuration } from "@/lib/utils/timestamps";
 import { DeleteSessionButton } from "@/components/sessions/delete-session-button";
+import { ReprocessButton } from "@/components/sessions/reprocess-button";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,9 @@ export default async function SessionPage({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {(isComplete || session.status === "error") && (
+            <ReprocessButton sessionId={sessionId} />
+          )}
           <DeleteSessionButton sessionId={sessionId} />
           <Badge
             variant="secondary"

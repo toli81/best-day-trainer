@@ -20,6 +20,13 @@ export async function POST(
     );
   }
 
+  // Allow reprocessing completed sessions — reset pipeline stage so it starts fresh
+  if (session.status === "complete") {
+    const { updateSessionStatus, deleteExercisesBySession } = await import("@/lib/db/queries");
+    await deleteExercisesBySession(sessionId);
+    await updateSessionStatus(sessionId, "uploaded", { pipelineStage: "" });
+  }
+
   // Concurrency check — only one session can process at a time
   if (isProcessing()) {
     return NextResponse.json(

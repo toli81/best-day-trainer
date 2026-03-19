@@ -141,4 +141,8 @@ export async function deleteExercise(id: string) {
   return db.delete(exercises).where(eq(exercises.id, id)).returning().get();
 }
 
+export async function deleteExercisesBySession(sessionId: string) {
+  return db.delete(exercises).where(eq(exercises.sessionId, sessionId)).returning().all();
+}
+
 type Exercise = typeof exercises.$inferSelect;

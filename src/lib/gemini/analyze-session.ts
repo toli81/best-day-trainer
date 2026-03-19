@@ -101,7 +101,19 @@ export async function analyzeSessionOverview(
 
     const text = response.text ?? "";
     console.log(`[Gemini] Raw overview response (first 500 chars): ${text.substring(0, 500)}`);
-    let parsed = JSON.parse(text);
+
+    if (!text.trim()) {
+      throw new Error("Gemini returned empty response for overview analysis");
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      console.error(`[Gemini] Failed to parse overview JSON: ${text.substring(0, 200)}`);
+      throw new Error(`Gemini returned invalid JSON for overview analysis: ${(e as Error).message}`);
+    }
 
     // Handle raw array response
     if (Array.isArray(parsed)) {
@@ -121,6 +133,11 @@ export async function analyzeSessionOverview(
     };
 
     console.log(`[Gemini] Normalized overview: ${result.exercises.length} exercises, ${result.totalExerciseCount} non-rest`);
+
+    if (realExercises.length === 0) {
+      throw new Error("Gemini returned zero exercises from overview analysis — video may not have been processed correctly");
+    }
+
     return ExerciseOverviewSchema.parse(result);
   }, "overview");
 }
@@ -156,7 +173,19 @@ export async function analyzeExerciseClip(
 
     const text = response.text ?? "";
     console.log(`[Gemini] Raw detail response for "${label}" (first 500 chars): ${text.substring(0, 500)}`);
-    let parsed = JSON.parse(text);
+
+    if (!text.trim()) {
+      throw new Error(`Gemini returned empty response for clip detail: ${label}`);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      console.error(`[Gemini] Failed to parse detail JSON for "${label}": ${text.substring(0, 200)}`);
+      throw new Error(`Gemini returned invalid JSON for clip "${label}": ${(e as Error).message}`);
+    }
 
     // Handle if Gemini wraps the result in an array or {exercises: [...]} wrapper
     if (Array.isArray(parsed)) {
