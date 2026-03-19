@@ -165,3 +165,11 @@ export async function getClient(id: string) {
 export async function createClient(data: NewClient) {
   return db.insert(clients).values(data).returning().get();
 }
+
+export async function getClientName(session: { clientId: string | null; clientName: string | null }): Promise<string | null> {
+  if (session.clientId) {
+    const client = await getClient(session.clientId);
+    if (client) return client.name;
+  }
+  return session.clientName || null;
+}

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getSession } from "@/lib/db/queries";
+import { getSession, getClientName } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -21,6 +21,8 @@ export default async function SessionPage({
 
   if (!session) notFound();
 
+  const clientDisplayName = await getClientName(session);
+
   const isComplete = session.status === "complete";
   const exercises = session.exercises || [];
 
@@ -33,7 +35,7 @@ export default async function SessionPage({
             {session.title || "Training Session"}
           </h1>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-            {session.clientName && <span>Client: {session.clientName}</span>}
+            {clientDisplayName && <span>Client: {clientDisplayName}</span>}
             <span>{new Date(session.recordedAt).toLocaleDateString()}</span>
             {session.durationSeconds && (
               <span>{formatDuration(session.durationSeconds)}</span>

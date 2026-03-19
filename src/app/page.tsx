@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listSessions } from "@/lib/db/queries";
+import { listSessions, getClientName } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,13 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const { sessions } = await listSessions(1, 20);
 
+  const sessionsWithClientNames = await Promise.all(
+    sessions.map(async (session) => ({
+      ...session,
+      resolvedClientName: await getClientName(session),
+    }))
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -38,7 +45,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {sessions.length === 0 ? (
+      {sessionsWithClientNames.length === 0 ? (
         <Card className="border-border bg-card shadow-sm">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#00CCFF]/10">
@@ -67,7 +74,7 @@ export default async function DashboardPage() {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          {sessions.map((session) => (
+          {sessionsWithClientNames.map((session) => (
             <Link key={session.id} href={`/sessions/${session.id}`}>
               <Card className="border-border bg-card transition-all hover:border-[#00CCFF]/30 hover:shadow-md">
                 <CardHeader className="pb-2">
@@ -85,7 +92,7 @@ export default async function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                    {session.clientName && <p>Client: {session.clientName}</p>}
+                    {session.resolvedClientName && <p>Client: {session.resolvedClientName}</p>}
                     <p>
                       {new Date(session.recordedAt).toLocaleDateString()}{" "}
                       {session.durationSeconds
