@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { ClientSelector } from "@/components/client-selector";
 
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -50,6 +51,8 @@ export default function RecordPage() {
   const uploader = useUpload();
   const [retrying, setRetrying] = useState(false);
   const [phase, setPhase] = useState<"setup" | "recording" | "uploading">("setup");
+  const [clientId, setClientId] = useState<string | null>(null);
+  const clientIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -62,6 +65,10 @@ export default function RecordPage() {
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    clientIdRef.current = clientId;
+  }, [clientId]);
 
   const handleStart = async () => {
     await wakeLock.request();
@@ -82,7 +89,7 @@ export default function RecordPage() {
         type: blob.type,
       });
       uploader
-        .upload(file)
+        .upload(file, clientIdRef.current || undefined)
         .then((sessionId) => {
           router.push(`/sessions/${sessionId}`);
         })
@@ -177,6 +184,10 @@ export default function RecordPage() {
             >
               Refresh Preview
             </Button>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-secondary-foreground">Client</label>
+              <ClientSelector value={clientId} onChange={setClientId} />
+            </div>
           </CardContent>
         </Card>
       )}
