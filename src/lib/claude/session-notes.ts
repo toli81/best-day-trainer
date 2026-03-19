@@ -1,5 +1,6 @@
 import { claude, CLAUDE_MODEL } from "./client";
 import type { Exercise, Session } from "@/lib/db/schema";
+import { getClientName } from "@/lib/db/queries";
 
 export async function generateSessionNotes(
   session: Session,
@@ -18,6 +19,8 @@ export async function generateSessionNotes(
     )
     .join("\n\n");
 
+  const clientDisplayName = await getClientName(session);
+
   const message = await claude.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 2048,
@@ -35,7 +38,7 @@ Keep the tone professional but accessible. Do not use overly technical jargon un
         role: "user",
         content: `Write session notes for the following training session:
 
-Client: ${session.clientName || "Not specified"}
+Client: ${clientDisplayName || "Not specified"}
 Date: ${new Date(session.recordedAt).toLocaleDateString()}
 Duration: ${session.durationSeconds ? Math.round(session.durationSeconds / 60) + " minutes" : "Not recorded"}
 Title: ${session.title || "Training Session"}
