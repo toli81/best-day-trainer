@@ -39,12 +39,14 @@ export function useMediaRecorder() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Enumerate devices
   const refreshDevices = useCallback(async () => {
     try {
-      // Need permission first to get labels
-      await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      // Need permission first to get labels — stop the throwaway stream immediately
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      tempStream.getTracks().forEach((t) => t.stop());
       const allDevices = await navigator.mediaDevices.enumerateDevices();
 
       const cameras = allDevices
@@ -101,7 +103,8 @@ export function useMediaRecorder() {
         error: `Device access denied: ${err}`,
       }));
     }
-  }, [selectedCamera, selectedMic]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     refreshDevices();
@@ -122,14 +125,14 @@ export function useMediaRecorder() {
     return types.find((t) => MediaRecorder.isTypeSupported(t)) || "video/webm";
   }, []);
 
-  // Start preview stream (stops old tracks first)
+  // Start preview stream (stops old tracks synchronously before requesting new one)
   const startPreview = useCallback(async () => {
     try {
-      // Stop existing stream tracks before requesting a new one
-      setState((prev) => {
-        prev.stream?.getTracks().forEach((t) => t.stop());
-        return prev;
-      });
+      // Stop existing stream tracks SYNCHRONOUSLY via ref before getUserMedia
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
 
       const constraints: MediaStreamConstraints = {
         video: selectedCamera
@@ -140,6 +143,7 @@ export function useMediaRecorder() {
           : true,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
       setState((prev) => ({ ...prev, stream, error: null }));
       return stream;
     } catch (err) {
@@ -230,7 +234,10 @@ export function useMediaRecorder() {
     if (mediaRecorderRef.current?.state !== "inactive") {
       mediaRecorderRef.current?.stop();
     }
-    state.stream?.getTracks().forEach((t) => t.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     if (timerRef.current) clearInterval(timerRef.current);
     setState({
       isRecording: false,
@@ -240,7 +247,7 @@ export function useMediaRecorder() {
       stream: null,
       blob: null,
     });
-  }, [state.stream]);
+  }, []);
 
   return {
     ...state,
