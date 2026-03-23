@@ -1,0 +1,183 @@
+Phase 2: Dashboard + Charts — Brainstorming Session
+Date: 2026-03-23
+============================================================
+
+PROJECT CONTEXT
+------------------------------------------------------------
+- Best Day Trainer: AI-powered video analysis tool for personal trainers
+- Phase 1 (Client Selector) completed 2026-03-19
+- Next.js 16 App Router + TypeScript + SQLite (Drizzle ORM) + Cloudflare R2
+- AI pipeline: Gemini 3.1 Pro (video analysis) + Claude (notes + tagging)
+- Auth infrastructure built but bypassed — app is public
+- Existing roadmap: Phase 2 = Dashboard + Charts, Phase 3 = Trainer Overlay, Phase 4 = Form Scoring
+- An earlier design spec existed (2026-03-18-client-portal-design.md) with Phase 2 outlined, but it assumed auth would be live by Phase 2
+
+BRAINSTORMING QUESTIONS & DECISIONS
+------------------------------------------------------------
+
+Q1: What does "next phase" mean — Dashboard + Charts, or something else (auth, trainer overlay)?
+A1: Dashboard + Charts (Phase 2 from the roadmap)
+
+Q2: Auth is still bypassed. Should the dashboard work without auth, enable auth first, or do both together?
+   A) Dashboard without auth — trainer-only, no login required, add auth later
+   B) Enable auth first, then dashboard
+   C) Both together
+A2: A — Dashboard without auth
+
+Q3: The spec outlines 6 dashboard pages (Overview, Volume, Form, Balance, Sessions, Notes). Which ones for MVP?
+A3: All of them
+
+Q4: The Form page depends on form scoring (Phase 4). How to handle?
+   A) Build page now, show empty state until Phase 4
+   B) Build form scoring into this phase so Form page has real data
+   C) Skip Form page for now
+A4: B — Pull form scoring into this phase
+
+Q5: Layout direction for dashboard navigation? (shown in visual companion)
+   A) Full Sidebar — persistent left sidebar with all nav items
+   B) Top Nav + Tab Bar — horizontal header with tabs below
+   C) Collapsed Icon Sidebar — slim icon rail that expands on hover
+A5: B — Top Nav + Tab Bar
+
+Q6: Should the dashboard be a separate section or replace the homepage?
+   A) Separate section at /dashboard, existing pages keep current layout
+   B) Replace homepage — dashboard becomes new /, existing pages keep their layout
+A6: B — Replace the homepage
+
+Q7: Mobile layout for dashboard tabs?
+   A) Scrollable tab bar at top
+   B) Bottom tab bar with icons (native app feel)
+   C) Top tabs with "More" overflow
+A7: B — Bottom tab bar
+
+Q8: Time range selector (7d/30d/90d/All) — global or per-page?
+   A) Global — one selector applies to all pages
+   B) Per-page — each page has its own selector
+A8: B — Per-page
+
+APPROACH SELECTION
+------------------------------------------------------------
+
+Approach A (SELECTED): Dashboard-First
+- Build dashboard shell and pages first using existing data
+- Most pages work immediately (sessions, exercises, muscle groups, reps/sets all exist)
+- Add form scoring as the last step, backfill existing exercises
+- Pros: Visible progress fast, can course-correct UI before pipeline work
+- Cons: Form page shows empty state temporarily during development
+
+Approach B (Not selected): Pipeline-First
+- Build form scoring first, reprocess sessions, then build UI on top
+- All pages have data from day one but slower to see anything visual
+
+DESIGN SECTIONS PRESENTED & APPROVED
+------------------------------------------------------------
+
+Section 1: Layout Architecture
+- Next.js route groups: (dashboard) for new layout, (legacy) for existing pages
+- Root layout becomes minimal (html/body/ThemeProvider only)
+- Dashboard pages at top-level routes: /, /volume, /form, /balance, /sessions, /notes
+- Existing pages (/record, /upload, /library, /sessions/[id]) keep current header layout
+- Both route groups share /sessions URL namespace intentionally
+- Desktop: sticky top nav (logo, client selector, Record/Upload/Library links, theme toggle) + tab bar below
+- Mobile: simplified top nav + fixed bottom tab bar (5 tabs + More)
+
+Section 2: Dashboard Pages & Data
+- Overview (/): 4 KPI stat cards, time range selector, combined area chart (volume + form), recent sessions
+  - KPI cards: Total Sessions, Consistency %, Monthly Volume, Avg Form Score
+  - Consistency for ranges < 2 weeks shows session count instead of percentage
+- Volume (/volume): bar chart of reps over time, filter by muscle group/exercise
+- Form (/form): line chart of form scores, AI score as solid line, override as distinct marker
+- Balance (/balance): donut chart of muscle group distribution
+- Sessions (/sessions): calendar heatmap + session list (absorbs current homepage)
+- Notes (/notes): chronological feed of AI session notes
+- Client selector in top nav: "All Clients" default + individual clients, persists via ?client= URL param
+- Empty states for no-data scenarios
+
+Section 3: API Routes
+- 6 dashboard API routes, all accept ?client= and ?range= params
+- GET /api/dashboard/stats — KPI card data
+- GET /api/dashboard/volume — volume chart data (+ muscleGroup/exercise filters)
+- GET /api/dashboard/form — form score chart data (+ exercise filter)
+- GET /api/dashboard/balance — muscle group distribution
+- GET /api/dashboard/sessions — heatmap + session list
+- GET /api/dashboard/notes — notes feed
+- PATCH /api/exercises/[exerciseId]/form-score — trainer override
+- Effective score logic: formScoreOverride ?? formScore
+
+Section 4: Form Scoring Pipeline Extension
+- New pipeline stage: form_scored (between tags_generated and complete)
+- Full stage order: downloaded -> uploaded_to_gemini -> overview_complete -> clips_extracted -> details_complete -> notes_generated -> tags_generated -> form_scored -> complete
+- Single Claude API call per session with all exercises + scoring rubric (1-10 scale)
+- Backfill endpoint: POST /api/admin/backfill-form-scores (synchronous, one session at a time)
+- Trainer override UI: inline edit on session detail page
+
+Section 5: Mobile Experience
+- Bottom tab bar: 5 visible tabs (Overview, Volume, Form, Balance, Sessions) + More
+- More sheet: Notes, Record, Upload, Library
+- Simplified top nav: logo + client selector only
+- KPI cards: 2x2 grid
+- Charts: full-width, responsive via Recharts <ResponsiveContainer>
+
+SPEC REVIEW
+------------------------------------------------------------
+
+Review 1 — Issues Found:
+1. Pipeline stage name inconsistency (scoring_form vs form_scored) — FIXED
+2. Sessions route namespace across two route groups not explained — FIXED (added note)
+3. Consistency % meaningless for 7d range — FIXED (fallback to session count)
+Recommendations noted: sessions route grouping, volume API sets field usage, shadcn/ui chart setup, backfill timeout risk
+
+Review 2 — Issues Found:
+1. Remaining scoring_form references in Database Changes and File Structure sections — FIXED (replaced all with form_scored)
+
+FINAL SPEC
+------------------------------------------------------------
+Written to: docs/superpowers/specs/2026-03-23-dashboard-charts-design.md
+Committed: ca33cae "Add Phase 2 Dashboard + Charts design spec"
+Status: Approved by user, ready for implementation planning
+
+TECH STACK FOR THIS PHASE
+------------------------------------------------------------
+- New dependency: recharts
+- Existing: Next.js 16, React 19, Tailwind CSS 4, shadcn/ui, Drizzle ORM, better-sqlite3
+- No new database tables — formScore and formScoreOverride columns already exist
+- Claude API extended for form scoring
+
+NEW FILES TO CREATE
+------------------------------------------------------------
+src/app/(dashboard)/layout.tsx
+src/app/(dashboard)/page.tsx
+src/app/(dashboard)/volume/page.tsx
+src/app/(dashboard)/form/page.tsx
+src/app/(dashboard)/balance/page.tsx
+src/app/(dashboard)/sessions/page.tsx
+src/app/(dashboard)/notes/page.tsx
+src/app/(legacy)/layout.tsx
+src/app/api/dashboard/stats/route.ts
+src/app/api/dashboard/volume/route.ts
+src/app/api/dashboard/form/route.ts
+src/app/api/dashboard/balance/route.ts
+src/app/api/dashboard/sessions/route.ts
+src/app/api/dashboard/notes/route.ts
+src/app/api/exercises/[exerciseId]/form-score/route.ts
+src/app/api/admin/backfill-form-scores/route.ts
+src/components/dashboard/top-nav.tsx
+src/components/dashboard/tab-bar.tsx
+src/components/dashboard/mobile-nav.tsx
+src/components/dashboard/stat-card.tsx
+src/components/dashboard/time-range-selector.tsx
+src/components/dashboard/overview-chart.tsx
+src/components/dashboard/volume-chart.tsx
+src/components/dashboard/form-chart.tsx
+src/components/dashboard/balance-chart.tsx
+src/components/dashboard/session-heatmap.tsx
+src/components/dashboard/session-list.tsx
+src/components/dashboard/notes-feed.tsx
+src/components/dashboard/empty-state.tsx
+
+FILES TO MODIFY
+------------------------------------------------------------
+src/app/layout.tsx — strip Header and constrained main, make minimal
+src/lib/processing/pipeline.ts — add form_scored stage to STAGE_ORDER
+src/lib/claude/ — add form scoring function
+Existing pages moved into (legacy) route group
