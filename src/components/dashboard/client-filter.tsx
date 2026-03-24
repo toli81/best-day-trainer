@@ -18,7 +18,7 @@ export function ClientFilter() {
   useEffect(() => {
     fetch("/api/clients")
       .then((r) => r.json())
-      .then((data) => setClients(data))
+      .then((data) => setClients(Array.isArray(data) ? data : data.clients || []))
       .catch(() => {});
   }, []);
 
