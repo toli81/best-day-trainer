@@ -12,6 +12,7 @@ import { uploadVideoToGemini, deleteGeminiFile } from "@/lib/gemini/client";
 import { extractClip, generateThumbnail, getVideoDuration } from "@/lib/video/ffmpeg";
 import { generateSessionNotes } from "@/lib/claude/session-notes";
 import { standardizeAndTagExercises } from "@/lib/claude/library-manager";
+import { scoreExerciseForms } from "@/lib/claude/form-scoring";
 import {
   updateSessionStatus,
   createExercise,
@@ -33,6 +34,7 @@ const STAGE_ORDER = [
   "details_complete",
   "notes_generated",
   "tags_generated",
+  "form_scored",
   "complete",
 ] as const;
 
@@ -350,7 +352,28 @@ export async function processSession(sessionId: string) {
       });
     }
 
-    // ─── Stage 8: Complete ───
+    // ─── Stage 8: Claude form scoring ───
+    if (!stageReached(stage, "form_scored")) {
+      console.log(`[${sessionId}] Stage 8: Scoring exercise forms...`);
+      try {
+        const fullSession = await getSession(sessionId);
+        if (fullSession && fullSession.exercises.length > 0) {
+          const scores = await scoreExerciseForms(fullSession.exercises);
+          for (const s of scores) {
+            await updateExercise(s.exerciseId, { formScore: s.score });
+          }
+          console.log(`[${sessionId}] Scored ${scores.length} exercises`);
+        }
+      } catch (err) {
+        console.error("Failed to score exercise forms:", err);
+      }
+
+      await updateSessionStatus(sessionId, "generating_notes", {
+        pipelineStage: "form_scored",
+      });
+    }
+
+    // ─── Stage 9: Complete ───
     await updateSessionStatus(sessionId, "complete", {
       pipelineStage: "complete",
       processingCompletedAt: new Date().toISOString(),
