@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FormScoreBadge } from "./form-score-badge";
 import { formatDuration } from "@/lib/utils/timestamps";
 import type { Exercise } from "@/lib/db/schema";
 
@@ -177,6 +178,13 @@ export function ExerciseDetail({
           ) : (
             exercise.description && <p>{exercise.description}</p>
           )}
+
+          {/* Form Score */}
+          <FormScoreBadge
+            exerciseId={exercise.id}
+            score={exercise.formScoreOverride ?? exercise.formScore}
+            isOverride={!!exercise.formScoreOverride}
+          />
 
           {/* Badges */}
           <div className="flex flex-wrap gap-2">

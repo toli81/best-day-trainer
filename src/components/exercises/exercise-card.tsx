@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FormScoreBadge } from "./form-score-badge";
 import { formatDuration } from "@/lib/utils/timestamps";
 import type { Exercise } from "@/lib/db/schema";
 
@@ -34,7 +35,14 @@ export function ExerciseCard({ exercise, onClick }: ExerciseCardProps) {
         </div>
       )}
       <CardContent className="p-3">
-        <h3 className="font-semibold leading-tight text-foreground">{exercise.name}</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="font-semibold leading-tight text-foreground">{exercise.name}</h3>
+          <FormScoreBadge
+            exerciseId={exercise.id}
+            score={exercise.formScoreOverride ?? exercise.formScore}
+            isOverride={!!exercise.formScoreOverride}
+          />
+        </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
           {exercise.description}
         </p>
