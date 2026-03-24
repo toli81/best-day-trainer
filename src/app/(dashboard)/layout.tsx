@@ -10,15 +10,25 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Suspense>
-      <TopNav />
-      <TabBar />
+    <>
+      <Suspense fallback={null}>
+        <TopNav />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TabBar />
+      </Suspense>
       {/* Mobile client filter */}
       <div className="border-b border-border px-4 py-2 md:hidden">
-        <ClientFilter />
+        <Suspense fallback={null}>
+          <ClientFilter />
+        </Suspense>
       </div>
-      <main className="px-4 py-6 pb-20 md:px-6 md:pb-6">{children}</main>
-      <MobileNav />
-    </Suspense>
+      <Suspense fallback={null}>
+        <main className="px-4 py-6 pb-20 md:px-6 md:pb-6">{children}</main>
+      </Suspense>
+      <Suspense fallback={null}>
+        <MobileNav />
+      </Suspense>
+    </>
   );
 }
