@@ -313,10 +313,13 @@ export async function processSession(sessionId: string) {
       await updateSessionStatus(sessionId, "generating_notes");
 
       let sessionNotes = "";
+      let reportDataJson = "";
       try {
         const fullSession = await getSession(sessionId);
         if (fullSession) {
-          sessionNotes = await generateSessionNotes(fullSession, fullSession.exercises);
+          const notesResult = await generateSessionNotes(fullSession, fullSession.exercises);
+          sessionNotes = notesResult.notes;
+          reportDataJson = JSON.stringify(notesResult.reportData);
         }
       } catch (err) {
         console.error("Failed to generate session notes:", err);
@@ -326,6 +329,7 @@ export async function processSession(sessionId: string) {
       await updateSessionStatus(sessionId, "generating_notes", {
         pipelineStage: "notes_generated",
         sessionNotes,
+        reportData: reportDataJson || undefined,
       });
     }
 
