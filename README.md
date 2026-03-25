@@ -8,7 +8,8 @@ A full-stack web application that helps personal trainers record, analyze, and d
 2. **AI analyzes** the video to identify every exercise performed
 3. **Extracts clips** and thumbnails for each individual exercise
 4. **Generates professional session notes** with form observations and recommendations
-5. **Builds a searchable library** of all exercises across all sessions
+5. **Produces a structured session report** with strengths, improvements, recommendations, and safety flags
+6. **Builds a searchable library** of all exercises across all sessions
 
 ## Features
 
@@ -42,6 +43,7 @@ A full-stack web application that helps personal trainers record, analyze, and d
   - Per-exercise observations
   - Form and technique assessment
   - Recommendations for the next session
+- **Claude** produces structured report data (strengths, improvements, recommendations, safety flags) for the Card Cascade session report
 - **Claude** standardizes exercise names and auto-generates searchability tags
 - Per-exercise checkpointing — failed exercises don't block the session
 - Reprocess button for completed or errored sessions
@@ -53,10 +55,18 @@ A full-stack web application that helps personal trainers record, analyze, and d
 - Inline editing for exercise name, description, and form notes
 - Delete individual exercises or entire sessions
 
+### Card Cascade Session Report
+- Dark-themed structured report replaces plain text display
+- **8 organized sections:** header, flags, session overview, category emphasis, exercise list, strengths, improvements/recommendations, session notes
+- **Expandable exercise rows** with coaching cues, form score, form notes, and clip links
+- **Double-click to rename** exercises inline (saves via API)
+- **Category emphasis chart** — percentage bars computed from exercise types
+- **Graceful degradation** — existing sessions without structured report data still render using fallback data from exercises and notes
+- **Safety flags** — AI-generated warnings and programming notes displayed as alert banners
+
 ### Session Management
 - Dashboard with all sessions and color-coded status badges
 - Real-time processing status with progress tracking
-- Detailed session view with notes and exercise grid
 - Retry analysis on error
 
 ### UI/UX
@@ -106,7 +116,7 @@ best-day-trainer/
 │   ├── components/
 │   │   ├── client-selector.tsx         # Client dropdown with inline add
 │   │   ├── exercises/                  # Exercise cards, detail modal, grid
-│   │   ├── sessions/                   # Processing status, delete, reprocess
+│   │   ├── sessions/                   # Session report, processing status, delete, reprocess
 │   │   ├── layout/                     # Header navigation
 │   │   └── ui/                         # shadcn/ui components
 │   ├── hooks/
@@ -136,7 +146,7 @@ best-day-trainer/
 
 **sessions** — Training session records
 - Video file reference (R2 key), duration, status
-- AI-generated overview analysis, detail analysis, and session notes
+- AI-generated overview analysis, detail analysis, session notes, and structured report data
 - Pipeline stage checkpointing for resumable processing
 - `clientId` FK to clients table (nullable for legacy sessions)
 
@@ -174,7 +184,7 @@ Upload clips + thumbnails to R2
     ↓
 Gemini: Detail pass — analyze each clip individually
     ↓
-Claude: Generate professional session notes
+Claude: Generate professional session notes + structured report data
     ↓
 Claude: Standardize names + generate tags
     ↓
@@ -234,9 +244,10 @@ git push origin master
 ## Roadmap
 
 - [x] Phase 1: Client data model + selector UI
-- [ ] Phase 2: Dashboard + charts (Recharts — volume, form, balance, frequency)
-- [ ] Phase 3: Trainer overlay (client roster, reminders, scheduling)
-- [ ] Phase 4: Form scoring (AI-generated scores + trainer override)
+- [x] Phase 2: Dashboard + charts (Recharts — volume, form, balance, frequency)
+- [x] Phase 3: Card Cascade session report + structured AI output
+- [ ] Phase 4: Trainer overlay (client roster, reminders, scheduling)
+- [ ] Phase 5: Form scoring improvements (AI-generated scores + trainer override)
 - [ ] Re-enable magic link authentication
 
 ## License
