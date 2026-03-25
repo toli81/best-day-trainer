@@ -34,6 +34,7 @@ export const sessions = sqliteTable("sessions", {
   overviewAnalysis: text("overview_analysis"),
   detailsAnalysis: text("details_analysis"),
   sessionNotes: text("session_notes"),
+  reportData: text("report_data"),
   pipelineStage: text("pipeline_stage"),
   tokenCount: integer("token_count"),
 

@@ -139,6 +139,7 @@ function initDb() {
   try { _sqlite.exec("ALTER TABLE sessions ADD COLUMN client_id TEXT"); } catch {}
   try { _sqlite.exec("ALTER TABLE exercises ADD COLUMN form_score INTEGER"); } catch {}
   try { _sqlite.exec("ALTER TABLE exercises ADD COLUMN form_score_override INTEGER"); } catch {}
+  try { _sqlite.exec("ALTER TABLE sessions ADD COLUMN report_data TEXT"); } catch {}
 
   // Recover sessions stuck in processing states (e.g., from server restart)
   _sqlite.exec(`

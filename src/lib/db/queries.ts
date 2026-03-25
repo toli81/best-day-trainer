@@ -47,6 +47,7 @@ export async function updateSessionStatus(
     pipelineStage: string;
     tokenCount: number;
     durationSeconds: number;
+    reportData: string;
   }>
 ) {
   return db
