@@ -50,6 +50,41 @@ async function checkCorsAccess(presignedUrl: string): Promise<string | null> {
   }
 }
 
+interface AttemptDiagnostics {
+  uploadId: string | null;
+  partNumber: number;
+  attempt: number;
+  totalAttempts: number;
+  errName: string;
+  errMessage: string;
+  responseStatus: number | null;
+  responseStatusText: string | null;
+  elapsedMs: number;
+  online: boolean;
+  connectionType: string | null;
+  userAgent: string;
+}
+
+function getConnectionType(): string | null {
+  if (typeof navigator === "undefined") return null;
+  const conn = (navigator as unknown as { connection?: { effectiveType?: string; type?: string } }).connection;
+  if (!conn) return null;
+  return conn.effectiveType || conn.type || null;
+}
+
+async function logAttempt(diag: AttemptDiagnostics) {
+  try {
+    await fetch("/api/upload/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(diag),
+      keepalive: true,
+    });
+  } catch {
+    // fire and forget — don't mask upload errors with logging errors
+  }
+}
+
 function classifyError(err: unknown, partNumber: number, retries: number): string {
   if (err instanceof DOMException && err.name === "AbortError") {
     return `Part ${partNumber} timed out after ${retries} attempts. Your connection may be too slow — try on WiFi.`;
@@ -57,12 +92,14 @@ function classifyError(err: unknown, partNumber: number, retries: number): strin
 
   const msg = err instanceof Error ? err.message : String(err);
 
-  // NetworkError / TypeError from fetch = CORS or connectivity issue
+  // NetworkError / TypeError from fetch. Could be real connectivity, OR an R2
+  // error response that stripped CORS headers so the browser can't expose the status.
   if (/network|fetch|failed to fetch/i.test(msg)) {
     return (
-      `Part ${partNumber} failed after ${retries} attempts: Network error. ` +
-      "This usually means a CORS misconfiguration on R2 or a connectivity issue. " +
-      "Try switching between WiFi and mobile data, or check R2 CORS settings."
+      `Part ${partNumber} failed after ${retries} attempts. ` +
+      "This can happen if the previous session is still processing on the server, " +
+      "if you're on a weak signal, or if R2 rejected the request. " +
+      "Wait a minute and tap Retry — if it keeps failing, switch between WiFi and mobile data."
     );
   }
 
@@ -73,11 +110,15 @@ async function uploadPartWithRetry(
   presignedUrl: string,
   partBlob: Blob,
   partNumber: number,
+  uploadId: string | null,
   retries = MAX_RETRIES
 ): Promise<string> {
   for (let attempt = 0; attempt < retries; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), PART_TIMEOUT_MS);
+    const startedAt = Date.now();
+    let responseStatus: number | null = null;
+    let responseStatusText: string | null = null;
 
     try {
       const res = await fetch(presignedUrl, {
@@ -87,6 +128,8 @@ async function uploadPartWithRetry(
       });
 
       clearTimeout(timeoutId);
+      responseStatus = res.status;
+      responseStatusText = res.statusText;
 
       if (!res.ok) {
         throw new Error(`Part ${partNumber} failed: ${res.status} ${res.statusText}`);
@@ -100,6 +143,25 @@ async function uploadPartWithRetry(
       return etag;
     } catch (err) {
       clearTimeout(timeoutId);
+
+      const errName = err instanceof Error ? err.name : typeof err;
+      const errMessage = err instanceof Error ? err.message : String(err);
+
+      // Fire-and-forget diagnostic log so the server sees the raw error per attempt
+      void logAttempt({
+        uploadId,
+        partNumber,
+        attempt: attempt + 1,
+        totalAttempts: retries,
+        errName,
+        errMessage,
+        responseStatus,
+        responseStatusText,
+        elapsedMs: Date.now() - startedAt,
+        online: typeof navigator !== "undefined" ? navigator.onLine : true,
+        connectionType: getConnectionType(),
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+      });
 
       if (attempt === retries - 1) {
         throw new Error(classifyError(err, partNumber, retries));
@@ -183,7 +245,7 @@ export function useUpload() {
           const partBlob = file.slice(start, end);
 
           const { partNumber, url } = presignedUrls[i];
-          const etag = await uploadPartWithRetry(url, partBlob, partNumber);
+          const etag = await uploadPartWithRetry(url, partBlob, partNumber, uploadId);
           completedParts.push({ ETag: etag, PartNumber: partNumber });
 
           const progress = Math.round(((i + 1) / totalParts) * 95); // 0-95%
@@ -213,6 +275,9 @@ export function useUpload() {
           sessionId,
           stage: "idle",
         });
+
+        // Release the File reference so its blob memory can be GC'd
+        lastArgsRef.current = null;
 
         return sessionId;
       } catch (err) {
